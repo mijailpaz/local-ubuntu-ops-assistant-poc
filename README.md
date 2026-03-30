@@ -42,9 +42,11 @@ This is meant for evaluation on a trusted machine or LAN, not internet-facing pr
 2. **Telegram Bot Token** from [@BotFather](https://t.me/botfather)
 3. **Telegram User ID** from [@userinfobot](https://t.me/userinfobot)
 4. **OpenAI API Key** from [OpenAI](https://platform.openai.com/api-keys)
-5. **Network access from the Ubuntu machine** to:
+5. **Sympla `S_TOKEN`** for the Sympla-backed workflows
+6. **Network access from the Ubuntu machine** to:
    - Telegram
    - OpenAI
+   - Sympla API
    - any internal systems you want the POC to call
 
 ## Installation
@@ -52,15 +54,20 @@ This is meant for evaluation on a trusted machine or LAN, not internet-facing pr
 Clone the repo onto your Ubuntu machine and run:
 
 ```bash
+cp .env.example .env
+# edit .env with any values you already know
 chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-The script will ask for:
+The repo-local `.env` file is only used as installer input defaults. The generated runtime file still lives at `/opt/openclaw/.env`.
+
+The script will ask only for values that are still missing:
 
 - Telegram Bot Token
 - Telegram User ID
 - OpenAI API Key
+- Sympla `S_TOKEN`
 - Local hostname or IP address to use for the n8n UI
 
 The installer will:
@@ -75,21 +82,20 @@ The installer will:
 
 1. Open n8n at `http://YOUR_HOST_OR_IP:5678`
 2. Create the initial n8n owner account in the browser
-3. Message your Telegram bot
-4. Build or import the POC workflows in n8n
-5. Test one read-only flow before trying any write action
+3. Import the Sympla workflow template from `workflows/n8n/sympla-poc-workflow.json`
+4. Update the webhook path in the imported workflow to match the generated `N8N_WEBHOOK_PATH`
+5. Message your Telegram bot
+6. Test one read-only flow before trying the gated check-in action
 
 ## POC Workflow Set
 
 The installer seeds the assistant workspace with a recommended workflow catalog:
 
-- `service_status`
-- `record_lookup`
-- `failures_summary`
-- `low_risk_remediation`
-- `incident_escalation`
+- `sympla_list_events`
+- `sympla_lookup_participant_by_ticket`
+- `sympla_checkin_participant`
 
-These are designed to demonstrate operational usefulness without starting with high-risk automation.
+These are designed to demonstrate real Sympla-backed operator workflows while keeping the first write action behind an explicit confirmation step.
 
 Detailed workflow guidance lives in [docs/poc-workflows.md](docs/poc-workflows.md).
 
@@ -108,14 +114,33 @@ The assistant will send payloads in this shape:
 
 ```json
 {
-  "workflow": "service_status",
-  "summary": "Check API health for the operator",
+  "workflow": "sympla_lookup_participant_by_ticket",
+  "summary": "Verify a participant by ticket number",
   "requiresConfirmation": false,
   "data": {
-    "target": "payments-api"
+    "event_id": "123456",
+    "ticket_number": "QHWA-1Q-3G0J",
+    "confirmed": false
   }
 }
 ```
+
+## Sympla Credential Handling
+
+The Sympla workflows use the `S_TOKEN` API header shown in [Sympla API v1.5.1.postman_collection.json](Sympla%20API%20v1.5.1.postman_collection.json).
+
+For this repository:
+
+- store the token in `/opt/openclaw/.env` as `SYMPLA_S_TOKEN`
+- let `n8n` read it from the runtime environment
+- do not ask the Telegram operator to paste the token into chat
+
+The imported workflow template expects:
+
+- `SYMPLA_BASE_URL`
+- `SYMPLA_S_TOKEN`
+- `OPENCLAW_GATEWAY_TOKEN`
+- `N8N_WEBHOOK_SECRET`
 
 ## Sending Messages Back To Telegram
 
@@ -161,7 +186,7 @@ Recommended behavior guidance lives in [docs/demo-checklist.md](docs/demo-checkl
 
 ## Changing API Key Or Model
 
-If you need to update the OpenAI key after installation, edit:
+If you need to update the OpenAI or Sympla key after installation, edit:
 
 - `/opt/openclaw/.env`
 
@@ -169,16 +194,18 @@ Change:
 
 ```env
 OPENAI_API_KEY=your-new-key
+SYMPLA_S_TOKEN=your-new-sympla-token
 ```
 
-Then recreate the OpenClaw container so Docker picks up the new environment variable:
+Then recreate the affected containers so Docker picks up the new environment variables:
 
 ```bash
 cd /opt/openclaw
 docker compose up -d --force-recreate openclaw-gateway
+docker compose up -d --force-recreate n8n n8n-worker
 ```
 
-If you only restart the container, Docker may keep using the old environment value.
+If you only restart the containers, Docker may keep using the old environment values.
 
 If you want to change the model, edit:
 
@@ -303,6 +330,7 @@ Check:
 - [docs/poc-workflows.md](docs/poc-workflows.md)
 - [docs/demo-checklist.md](docs/demo-checklist.md)
 - [docs/production-concerns.md](docs/production-concerns.md)
+- [workflows/n8n/sympla-poc-workflow.json](workflows/n8n/sympla-poc-workflow.json)
 
 ## Disclaimer
 

@@ -1,0 +1,503 @@
+{
+  "info": {
+    "_postman_id": "fffa6019-f2f5-453e-8553-bdf06527f30f",
+    "name": "Sympla API v1.5.1",
+    "description": "Postman collection generated from the provided OpenAPI 3.1.0 spec for Sympla API.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "8511595"
+  },
+  "item": [
+    {
+      "name": "Eventos",
+      "item": [
+        {
+          "name": "Listar eventos",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events"
+              ]
+            },
+            "description": "Retorna os eventos criados pelo organizador."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar evento por identificador",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}"
+              ]
+            },
+            "description": "Retorna o evento correspondente ao identificador informado."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Pedidos",
+      "item": [
+        {
+          "name": "Listar pedidos por evento",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/orders?status=false&buyer_email=&page_size=100&page=1&field_sort=&sort=ASC&fields=&timezone=America/Sao_Paulo&from=&to=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "false"
+                },
+                {
+                  "key": "buyer_email",
+                  "value": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "100"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "field_sort",
+                  "value": ""
+                },
+                {
+                  "key": "sort",
+                  "value": "ASC"
+                },
+                {
+                  "key": "fields",
+                  "value": ""
+                },
+                {
+                  "key": "timezone",
+                  "value": "America/Sao_Paulo"
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Retorna os pedidos de um determinado evento."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar pedido por identificador",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/orders/{{order_id}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "orders",
+                "{{order_id}}"
+              ]
+            },
+            "description": "Retorna o pedido correspondente ao identificador informado."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar participantes por pedido",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/orders/{{order_id}}/participants?cancelled=&page_size=100&page=1&field_sort=&sort=ASC&fields=&from=&to=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "orders",
+                "{{order_id}}",
+                "participants"
+              ],
+              "query": [
+                {
+                  "key": "cancelled",
+                  "value": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "100"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "field_sort",
+                  "value": ""
+                },
+                {
+                  "key": "sort",
+                  "value": "ASC"
+                },
+                {
+                  "key": "fields",
+                  "value": ""
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Retorna o(s) participante(s) contido(s) em um determinado pedido."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Participantes",
+      "item": [
+        {
+          "name": "Listar participantes por evento",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/participants?cancelled_filter=none&ticket_number=&participant_email=&page_size=100&page=1&field_sort=&sort=ASC&fields=&from=&to=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "participants"
+              ],
+              "query": [
+                {
+                  "key": "cancelled_filter",
+                  "value": "none"
+                },
+                {
+                  "key": "ticket_number",
+                  "value": ""
+                },
+                {
+                  "key": "participant_email",
+                  "value": ""
+                },
+                {
+                  "key": "page_size",
+                  "value": "100"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "field_sort",
+                  "value": ""
+                },
+                {
+                  "key": "sort",
+                  "value": "ASC"
+                },
+                {
+                  "key": "fields",
+                  "value": ""
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Retorna os participantes de um determinado evento."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar participante por id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/participants/{{participant_id}}?cancelled_filter=none&fields=&from=&to=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "participants",
+                "{{participant_id}}"
+              ],
+              "query": [
+                {
+                  "key": "cancelled_filter",
+                  "value": "none"
+                },
+                {
+                  "key": "fields",
+                  "value": ""
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Retorna o participante correspondente ao id informado."
+          },
+          "response": []
+        },
+        {
+          "name": "Listar participante por número de ingresso",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/participants/ticketNumber/{{ticket_number}}?cancelled_filter=none&fields=&from=&to=",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "participants",
+                "ticketNumber",
+                "{{ticket_number}}"
+              ],
+              "query": [
+                {
+                  "key": "cancelled_filter",
+                  "value": "none"
+                },
+                {
+                  "key": "fields",
+                  "value": ""
+                },
+                {
+                  "key": "from",
+                  "value": ""
+                },
+                {
+                  "key": "to",
+                  "value": ""
+                }
+              ]
+            },
+            "description": "Retorna o participante correspondente ao ingresso informado."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Check-in",
+      "item": [
+        {
+          "name": "Check-in por id do ingresso",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/participants/{{participant_id}}/checkin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "participants",
+                "{{participant_id}}",
+                "checkin"
+              ]
+            },
+            "description": "Realiza o check-in de um participante por id do ingresso."
+          },
+          "response": []
+        },
+        {
+          "name": "Check-in por número do ingresso",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "S_TOKEN",
+                "value": "{{s_token}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/events/{{event_id}}/participants/ticketNumber/{{ticket_number}}/checkin",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "events",
+                "{{event_id}}",
+                "participants",
+                "ticketNumber",
+                "{{ticket_number}}",
+                "checkin"
+              ]
+            },
+            "description": "Realiza o check-in de um participante por número do ingresso."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "S_TOKEN",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{s_token}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://api.sympla.com.br/public/v1.5.1"
+    },
+    {
+      "key": "s_token",
+      "value": ""
+    },
+    {
+      "key": "event_id",
+      "value": "123456"
+    },
+    {
+      "key": "presentation_id",
+      "value": "987654"
+    },
+    {
+      "key": "order_id",
+      "value": "Q080KEE"
+    },
+    {
+      "key": "participant_id",
+      "value": "102345"
+    },
+    {
+      "key": "ticket_number",
+      "value": "QHWA-1Q-3G0J"
+    }
+  ]
+}
