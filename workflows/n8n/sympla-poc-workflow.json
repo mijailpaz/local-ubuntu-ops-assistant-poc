@@ -1,0 +1,402 @@
+{
+  "name": "Sympla POC Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "replace-me-with-n8n-webhook-path",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-openclaw",
+      "name": "OpenClaw Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        260,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const headers = $json.headers || {};\nconst body = $json.body || {};\nconst data = body.data || {};\nconst expectedSecret = $env.N8N_WEBHOOK_SECRET;\nconst receivedSecret = headers['x-webhook-secret'] || headers['X-Webhook-Secret'];\n\nif (!expectedSecret) {\n  throw new Error('N8N_WEBHOOK_SECRET is not configured in the n8n runtime environment.');\n}\n\nif (receivedSecret !== expectedSecret) {\n  throw new Error('Invalid X-Webhook-Secret header.');\n}\n\nif (!$env.SYMPLA_S_TOKEN) {\n  throw new Error('SYMPLA_S_TOKEN is not configured in the n8n runtime environment.');\n}\n\nreturn [{\n  json: {\n    workflow: body.workflow || '',\n    summary: body.summary || '',\n    requiresConfirmation: Boolean(body.requiresConfirmation),\n    confirmed: Boolean(data.confirmed),\n    event_id: data.event_id || '',\n    ticket_number: data.ticket_number || '',\n    participant_id: data.participant_id || '',\n    sessionKey: data.sessionKey || 'agent:main:main'\n  }\n}];"
+      },
+      "id": "validate-request",
+      "name": "Validate OpenClaw Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        500,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{$json.workflow}}",
+        "rules": {
+          "rules": [
+            {
+              "operation": "equal",
+              "value2": "sympla_list_events"
+            },
+            {
+              "operation": "equal",
+              "value2": "sympla_lookup_participant_by_ticket"
+            },
+            {
+              "operation": "equal",
+              "value2": "sympla_checkin_participant"
+            }
+          ]
+        }
+      },
+      "id": "switch-workflow",
+      "name": "Workflow Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        740,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SYMPLA_BASE_URL + '/events'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "S_TOKEN",
+              "value": "={{$env.SYMPLA_S_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-list-events",
+      "name": "Sympla List Events",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        990,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const candidate = $json.data ?? $json;\nconst events = Array.isArray(candidate) ? candidate : (Array.isArray(candidate.data) ? candidate.data : []);\nconst preview = events.slice(0, 3).map((event, index) => {\n  const eventName = event.name || event.title || event.event_name || 'Evento sem nome';\n  const eventId = event.id || event.event_id || 'sem id';\n  return `${index + 1}. ${eventName} (${eventId})`;\n}).join('\\n');\nconst findings = events.length ? `Found ${events.length} Sympla event(s).${preview ? `\\n${preview}` : ''}` : 'No Sympla events were returned for this organizer.';\nreturn [{ json: { sessionKey: $('Validate OpenClaw Request').item.json.sessionKey, replyMessage: `Status: success\\nFindings: ${findings}\\nAction taken: Listed organizer events from Sympla.\\nNext step: Ask for an event ID and ticket number to look up a participant or request a gated check-in.` } }];"
+      },
+      "id": "format-list-events",
+      "name": "Format List Events",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{$env.SYMPLA_BASE_URL + '/events/' + $('Validate OpenClaw Request').item.json.event_id + '/participants/ticketNumber/' + $('Validate OpenClaw Request').item.json.ticket_number + '?cancelled_filter=none&fields=&from=&to='}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "S_TOKEN",
+              "value": "={{$env.SYMPLA_S_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-lookup-participant",
+      "name": "Sympla Lookup Participant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        990,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const participant = $json.data || $json.participant || $json;\nconst ticketNumber = participant.ticket_number || participant.ticket_num || $('Validate OpenClaw Request').item.json.ticket_number;\nconst participantName = [participant.first_name, participant.last_name].filter(Boolean).join(' ') || participant.name || participant.full_name || 'Participant found';\nconst checkinStatus = participant.checkin_status || participant.checked_in || participant.checkin || 'unknown';\nreturn [{ json: { sessionKey: $('Validate OpenClaw Request').item.json.sessionKey, replyMessage: `Status: success\\nFindings: ${participantName} matched ticket ${ticketNumber}. Check-in status: ${checkinStatus}.\\nAction taken: Looked up the participant in Sympla.\\nNext step: If the participant is ready to enter, request a gated check-in.` } }];"
+      },
+      "id": "format-lookup",
+      "name": "Format Participant Lookup",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1240,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{$json.confirmed}}",
+              "operation": "isTrue"
+            }
+          ]
+        }
+      },
+      "id": "if-confirmed",
+      "name": "Checkin Confirmed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        990,
+        620
+      ]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            {
+              "name": "sessionKey",
+              "value": "={{$json.sessionKey}}"
+            },
+            {
+              "name": "replyMessage",
+              "value": "=Status: confirmation_required\nFindings: Sympla check-in is a gated action for ticket {{$json.ticket_number}} on event {{$json.event_id}}.\nAction taken: No check-in was executed yet.\nNext step: Confirm the action by sending the same request with explicit confirmation."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-confirmation-needed",
+      "name": "Set Confirmation Needed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1240,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{$env.SYMPLA_BASE_URL + '/events/' + $('Validate OpenClaw Request').item.json.event_id + '/participants/ticketNumber/' + $('Validate OpenClaw Request').item.json.ticket_number + '/checkin'}}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "S_TOKEN",
+              "value": "={{$env.SYMPLA_S_TOKEN}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-checkin",
+      "name": "Sympla Checkin Participant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1240,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ticketNumber = $('Validate OpenClaw Request').item.json.ticket_number;\nconst eventId = $('Validate OpenClaw Request').item.json.event_id;\nreturn [{ json: { sessionKey: $('Validate OpenClaw Request').item.json.sessionKey, replyMessage: `Status: success\\nFindings: Sympla accepted the check-in request for ticket ${ticketNumber} on event ${eventId}.\\nAction taken: Participant check-in executed.\\nNext step: If needed, run a participant lookup to verify the updated check-in state.` } }];"
+      },
+      "id": "format-checkin",
+      "name": "Format Checkin Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1480,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://openclaw-gateway:18789/tools/invoke",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "={{'Bearer ' + $env.OPENCLAW_GATEWAY_TOKEN}}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ { \"tool\": \"sessions_send\", \"args\": { \"sessionKey\": $json.sessionKey || 'agent:main:main', \"message\": $json.replyMessage, \"timeoutSeconds\": 0 } } }}"
+      },
+      "id": "http-send-telegram",
+      "name": "Send Result To OpenClaw",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1720,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "OpenClaw Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate OpenClaw Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate OpenClaw Request": {
+      "main": [
+        [
+          {
+            "node": "Workflow Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Workflow Switch": {
+      "main": [
+        [
+          {
+            "node": "Sympla List Events",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sympla Lookup Participant",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Checkin Confirmed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sympla List Events": {
+      "main": [
+        [
+          {
+            "node": "Format List Events",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format List Events": {
+      "main": [
+        [
+          {
+            "node": "Send Result To OpenClaw",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sympla Lookup Participant": {
+      "main": [
+        [
+          {
+            "node": "Format Participant Lookup",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Participant Lookup": {
+      "main": [
+        [
+          {
+            "node": "Send Result To OpenClaw",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Checkin Confirmed?": {
+      "main": [
+        [
+          {
+            "node": "Sympla Checkin Participant",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set Confirmation Needed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set Confirmation Needed": {
+      "main": [
+        [
+          {
+            "node": "Send Result To OpenClaw",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sympla Checkin Participant": {
+      "main": [
+        [
+          {
+            "node": "Format Checkin Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Checkin Result": {
+      "main": [
+        [
+          {
+            "node": "Send Result To OpenClaw",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "sympla-poc-workflow-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "pinData": {}
+}

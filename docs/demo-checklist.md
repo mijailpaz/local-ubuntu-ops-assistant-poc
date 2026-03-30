@@ -13,10 +13,12 @@ Use this checklist to validate the local Ubuntu operations assistant proof of co
 ## Minimum Workflow Setup
 
 - The inbound n8n webhook exists with the generated path.
-- The webhook uses `X-Webhook-Secret` header authentication.
+- The imported Sympla workflow template is present in n8n.
+- The workflow validates `X-Webhook-Secret`.
 - The workflow can branch on the `workflow` field.
-- At least one read-only path is implemented.
-- At least one confirmation-gated write path is implemented.
+- The Sympla `S_TOKEN` is configured in the runtime environment.
+- Two read-only Sympla paths are implemented.
+- One confirmation-gated Sympla action is implemented.
 
 ## Guardrail Checks
 
@@ -30,20 +32,19 @@ Use this checklist to validate the local Ubuntu operations assistant proof of co
 
 1. Show the local n8n instance running on Ubuntu.
 2. Show the Telegram bot responding to the operator.
-3. Ask for a read-only service status check.
-4. Ask for a failure summary.
-5. Request a low-risk remediation action.
+3. Ask for the current Sympla event list.
+4. Look up a participant by ticket number.
+5. Request a participant check-in.
 6. Show the assistant asking for confirmation before the write action.
-7. Confirm the action and show the result.
+7. Confirm the check-in and show the result.
 8. Show logs or execution history in n8n as the audit trail.
 
 ## Example Prompts
 
-- `Check the status of the payments API.`
-- `Look up ticket OPS-4312.`
-- `Summarize failed jobs from today.`
-- `Restart the staging worker service.`
-- `Create an incident escalation for the overnight queue failures.`
+- `List my current Sympla events.`
+- `Look up ticket QHWA-1Q-3G0J for event 123456.`
+- `Check in ticket QHWA-1Q-3G0J for event 123456.`
+- `Confirm the Sympla check-in.`
 
 ## Stakeholder Talking Points
 
@@ -59,5 +60,6 @@ Use this checklist to validate the local Ubuntu operations assistant proof of co
 - Advanced secret rotation
 - High-risk automations without approvals
 - Multi-user team collaboration flows
+- Broad Sympla coverage beyond the first three workflows
 
 Keep the first demo small and believable. A narrow, reliable POC is better than a broad but fragile one.

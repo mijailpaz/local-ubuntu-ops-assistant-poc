@@ -61,7 +61,19 @@ Create or copy an API key from [OpenAI](https://platform.openai.com/api-keys).
 
 You will enter it during setup so the OpenClaw gateway can make model calls.
 
-## 5. Clone The Repository
+## 5. Get Your Sympla `S_TOKEN`
+
+This POC uses Sympla-backed workflows through `n8n`, so you also need a valid Sympla API token.
+
+The Sympla collection in this repository shows that the API uses:
+
+- header name: `S_TOKEN`
+- auth type: header API key
+- base URL: `https://api.sympla.com.br/public/v1.5.1`
+
+Store that token for the installer prompt.
+
+## 6. Clone The Repository
 
 On the Ubuntu machine:
 
@@ -72,7 +84,15 @@ cd openclaw-n8n-starter
 
 If you already have the repository locally, just enter the repo directory.
 
-## 6. Run The Installer
+## 7. Run The Installer
+
+First, create the repo-local setup defaults file:
+
+```bash
+cp .env.example .env
+```
+
+Optionally fill in any values you already know in `.env`. The installer will only prompt for missing values.
 
 Run:
 
@@ -86,6 +106,7 @@ The script will ask for:
 - Telegram Bot Token
 - Telegram User ID
 - OpenAI API Key
+- Sympla `S_TOKEN`
 - local hostname or IP for the n8n UI
 
 The installer will then:
@@ -94,10 +115,11 @@ The installer will then:
 - pull the official prebuilt OpenClaw image
 - create the OpenClaw configuration
 - create the Telegram channel configuration with your allowlisted user ID
+- store the Sympla token in the local runtime environment
 - create the n8n, Postgres, and Redis stack
 - print the generated secrets and webhook information
 
-## 7. Save The Installer Output
+## 8. Save The Installer Output
 
 At the end of the install, save these values:
 
@@ -106,10 +128,11 @@ At the end of the install, save these values:
 - `Header Auth Name`
 - `Header Auth Value`
 - `OpenClaw Gateway Token`
+- `Sympla base URL`
 
 You will need them when creating the n8n workflow.
 
-## 8. Open n8n In The Browser
+## 9. Open n8n In The Browser
 
 Open:
 
@@ -124,7 +147,32 @@ Then:
 
 This setup uses local HTTP for simplicity, so it is intended for trusted local or LAN testing.
 
-## 9. Confirm The Telegram Bot Is Reachable
+## 10. Import The Sympla Workflow Template
+
+Import the workflow template stored in this repository:
+
+```text
+workflows/n8n/sympla-poc-workflow.json
+```
+
+In n8n:
+
+1. Choose to import an existing workflow JSON file
+2. Import `workflows/n8n/sympla-poc-workflow.json`
+3. Save the workflow in n8n
+
+After import, adjust the webhook path in the `Webhook` node so it matches the generated path printed by `setup.sh` or stored in `/opt/openclaw/.env` as `N8N_WEBHOOK_PATH`.
+
+This workflow template expects these environment variables inside n8n:
+
+- `SYMPLA_BASE_URL`
+- `SYMPLA_S_TOKEN`
+- `OPENCLAW_GATEWAY_TOKEN`
+- `N8N_WEBHOOK_SECRET`
+
+The installer writes these into `/opt/openclaw/.env` and injects them into the n8n containers.
+
+## 11. Confirm The Telegram Bot Is Reachable
 
 Open your Telegram bot and send a simple message such as:
 
@@ -134,16 +182,13 @@ hello
 
 If the bot does not respond yet, that is okay if you have not finished wiring the n8n workflow. The important thing is that the Telegram bot exists and the OpenClaw gateway is running.
 
-## 10. Create The Inbound n8n Webhook
+## 12. Review The Inbound n8n Webhook
 
-In n8n:
+In the imported workflow:
 
-1. Create a new workflow
-2. Add a `Webhook` node
-3. Set the path to the generated webhook path from the installer output
-4. Configure header authentication:
-  - Header name: `X-Webhook-Secret`                                                                                                                                                                                                                                                                                                                                                                                 
-  - Header value: use the printed secret
+1. Open the `Webhook` node
+2. Set the path to the generated webhook path from the installer output
+3. Confirm the workflow validates the `X-Webhook-Secret` header using `N8N_WEBHOOK_SECRET`
 
 This webhook receives requests from OpenClaw.
 
@@ -151,49 +196,63 @@ The request body will look like this:
 
 ```json
 {
-  "workflow": "service_status",
-  "summary": "Check API health for the operator",
+  "workflow": "sympla_lookup_participant_by_ticket",
+  "summary": "Verify a participant by ticket number",
   "requiresConfirmation": false,
   "data": {
-    "target": "payments-api"
+    "event_id": "123456",
+    "ticket_number": "QHWA-1Q-3G0J",
+    "confirmed": false
   }
 }
 ```
 
-## 11. Add Workflow Routing In n8n
+## 13. Review The Workflow Routing In n8n
 
 After the `Webhook` node:
 
 1. Add a `Switch` node
 2. Route based on the `workflow` field
 
-Recommended first branches:
+The imported workflow should already include these branches:
 
-- `service_status`
-- `record_lookup`
-- `failures_summary`
+- `sympla_list_events`
+- `sympla_lookup_participant_by_ticket`
+- `sympla_checkin_participant`
 
-For the first test, implement only `service_status`.
+For the first test, activate the two read-only branches first.
 
-## 12. Build A Minimal `service_status` Flow
+## 14. Validate The Read-Only Branches
 
-For a simple first validation:
+The imported workflow should perform:
 
-1. From the `service_status` branch, add a `Set` node
-2. Return a mock structured response such as:
+1. `sympla_list_events` -> `GET /events`
+2. `sympla_lookup_participant_by_ticket` -> `GET /events/{event_id}/participants/ticketNumber/{ticket_number}`
 
-```json
-{
-  "status": "healthy",
-  "findings": "Payments API responded normally.",
-  "actionTaken": "Read-only check completed.",
-  "nextStep": "No action required."
-}
+Each branch should format the Sympla result into a short operator message with:
+
+- `Status`
+- `Findings`
+- `Action taken`
+- `Next step`
+
+## 15. Confirm The Gated Check-In Path
+
+The imported workflow should not execute check-in on the first request.
+
+Expected behavior:
+
+1. The operator requests `sympla_checkin_participant`
+2. The workflow returns a confirmation-needed message
+3. Only a second confirmed request should trigger the POST check-in call
+
+The check-in endpoint should use:
+
+```text
+POST /events/{{event_id}}/participants/ticketNumber/{{ticket_number}}/checkin
 ```
 
-This proves the integration works before connecting real internal systems.
-
-## 13. Send The Result Back To OpenClaw
+## 16. Send The Result Back To OpenClaw
 
 After the formatter node, add an `HTTP Request` node in n8n with:
 
@@ -217,7 +276,7 @@ Example body:
 
 Use the gateway token printed by the installer.
 
-## 14. Activate The Workflow
+## 17. Activate The Workflow
 
 In n8n:
 
@@ -226,40 +285,40 @@ In n8n:
 
 Once activated, OpenClaw can call it through the internal webhook URL.
 
-## 15. Test End To End From Telegram
+## 18. Test End To End From Telegram
 
-In Telegram, send a prompt such as:
+In Telegram, test in this order:
+
+### Test 1: list events
 
 ```text
-Check the status of the payments API.
+List my current Sympla events.
 ```
 
-Expected flow:
+### Test 2: participant lookup
 
-1. Telegram sends your message to OpenClaw
-2. OpenClaw decides to call the `n8n-ops-workflows` skill
-3. The skill sends a request to the n8n webhook
-4. n8n processes the `service_status` branch
-5. n8n calls `sessions_send`
-6. The result comes back to you in Telegram
+```text
+Look up ticket QHWA-1Q-3G0J for event 123456.
+```
 
-## 16. Add More Workflows
+### Test 3: gated check-in
 
-After the first end-to-end success, add:
+```text
+Check in ticket QHWA-1Q-3G0J for event 123456.
+```
 
-- `record_lookup`
-- `failures_summary`
-- `low_risk_remediation`
-- `incident_escalation`
+The check-in flow should first ask for confirmation before executing the action.
 
-Use explicit confirmation for:
+## 19. Add More Workflows
 
-- `low_risk_remediation`
-- `incident_escalation`
+After the first end-to-end success, you can extend the same pattern to:
 
-Those are intended to be write actions.
+- order lookup
+- participant lookup by participant ID
+- event lookup by event ID
+- other controlled Sympla actions
 
-## 17. Useful Commands
+## 20. Useful Commands
 
 View all logs:
 
@@ -289,13 +348,15 @@ cd /opt/openclaw
 docker compose restart
 ```
 
-## 18. Change API Key Or Model Later
+## 21. Change API Key, Sympla Token, Or Model Later
 
-If you want to rotate the OpenAI key after installation:
+If you want to rotate the OpenAI key or Sympla token after installation:
 
 1. Edit `/opt/openclaw/.env`
-2. Update the `OPENAI_API_KEY` value
-3. Recreate the OpenClaw container
+2. Update:
+   - `OPENAI_API_KEY`
+   - `SYMPLA_S_TOKEN`
+3. Recreate the affected containers
 
 Example:
 
@@ -303,9 +364,10 @@ Example:
 sudo nano /opt/openclaw/.env
 cd /opt/openclaw
 sudo docker compose up -d --force-recreate openclaw-gateway
+sudo docker compose up -d --force-recreate n8n n8n-worker
 ```
 
-Use `up -d --force-recreate`, not only `restart`, because Docker may keep the old environment value if the container is not recreated.
+Use `up -d --force-recreate`, not only `restart`, because Docker may keep the old environment value if the containers are not recreated.
 
 If you want to change the model:
 
@@ -335,9 +397,9 @@ cd /opt/openclaw
 sudo docker compose up -d --force-recreate openclaw-gateway
 ```
 
-Do not rerun `setup.sh` only to rotate the API key or change the model unless you want a full re-bootstrap, because the installer also regenerates other secrets such as the webhook secret and gateway token.
+Do not rerun `setup.sh` only to rotate the API key, rotate the Sympla token, or change the model unless you want a full re-bootstrap, because the installer also regenerates other secrets such as the webhook secret and gateway token.
 
-## 19. Troubleshooting
+## 22. Troubleshooting
 
 If Telegram does not respond:
 
@@ -358,8 +420,10 @@ If the webhook does not run:
 - verify `X-Webhook-Secret`
 - verify the workflow is activated
 - verify the HTTP Request node uses the correct gateway token
+- verify `SYMPLA_S_TOKEN` is present in `/opt/openclaw/.env`
+- verify the n8n containers were recreated after changing the Sympla token
 
-## 20. What To Do Next
+## 23. What To Do Next
 
 Once the first flow works, move in this order:
 
@@ -368,6 +432,7 @@ Once the first flow works, move in this order:
 3. require explicit confirmations for write actions
 4. validate the demo using [docs/demo-checklist.md](demo-checklist.md)
 5. review [docs/production-concerns.md](production-concerns.md) before treating this as anything beyond a POC
+6. replace demo event IDs and ticket numbers with real Sympla operator inputs
 
 ## Related Docs
 
@@ -375,4 +440,5 @@ Once the first flow works, move in this order:
 - [docs/poc-workflows.md](poc-workflows.md)
 - [docs/demo-checklist.md](demo-checklist.md)
 - [docs/production-concerns.md](production-concerns.md)
+- [workflows/n8n/sympla-poc-workflow.json](../workflows/n8n/sympla-poc-workflow.json)
 

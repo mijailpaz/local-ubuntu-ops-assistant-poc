@@ -6,6 +6,17 @@ if [ "${EUID}" -ne 0 ]; then
   exit 1
 fi
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SETUP_ENV_FILE="${SCRIPT_DIR}/.env"
+
+if [ -f "${SETUP_ENV_FILE}" ]; then
+  # Load repo-local setup defaults without changing the generated runtime env file location.
+  set -a
+  # shellcheck disable=SC1090
+  source "${SETUP_ENV_FILE}"
+  set +a
+fi
+
 echo ""
 echo "==============================================="
 echo "  Local Ubuntu OpenClaw + n8n Ops Assistant"
@@ -17,19 +28,34 @@ echo ""
 # COLLECT USER INPUT
 #######################################
 
-read -r -p "Enter your Telegram Bot Token: " TELEGRAM_BOT_TOKEN
-read -r -p "Enter your Telegram User ID: " TELEGRAM_USER_ID
-read -r -p "Enter your OpenAI API Key: " OPENAI_API_KEY
+if [ -z "${TELEGRAM_BOT_TOKEN:-}" ]; then
+  read -r -p "Enter your Telegram Bot Token: " TELEGRAM_BOT_TOKEN
+fi
+
+if [ -z "${TELEGRAM_USER_ID:-}" ]; then
+  read -r -p "Enter your Telegram User ID: " TELEGRAM_USER_ID
+fi
+
+if [ -z "${OPENAI_API_KEY:-}" ]; then
+  read -r -p "Enter your OpenAI API Key: " OPENAI_API_KEY
+fi
+
+if [ -z "${SYMPLA_S_TOKEN:-}" ]; then
+  read -r -p "Enter your Sympla S_TOKEN [optional, required for Sympla workflows]: " SYMPLA_S_TOKEN
+fi
 
 DEFAULT_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
 if [ -z "${DEFAULT_HOST}" ]; then
   DEFAULT_HOST="$(hostname -f 2>/dev/null || hostname)"
 fi
 
-read -r -p "Enter the local hostname or IP for n8n [${DEFAULT_HOST}]: " N8N_HOST
-N8N_HOST=${N8N_HOST:-$DEFAULT_HOST}
-N8N_PORT=5678
-N8N_PROTOCOL=http
+if [ -z "${N8N_HOST:-}" ]; then
+  read -r -p "Enter the local hostname or IP for n8n [${DEFAULT_HOST}]: " N8N_HOST
+  N8N_HOST=${N8N_HOST:-$DEFAULT_HOST}
+fi
+
+N8N_PORT=${N8N_PORT:-5678}
+N8N_PROTOCOL=${N8N_PROTOCOL:-http}
 N8N_BASE_URL="${N8N_PROTOCOL}://${N8N_HOST}:${N8N_PORT}"
 OPENCLAW_IMAGE=${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
 
@@ -110,28 +136,20 @@ EOF
 
 echo "=== Creating POC workflow catalog ==="
 cat > /root/.openclaw/workspace/playbooks/poc-workflows.md << EOF
-# Internal Ops Assistant POC Workflows
+# Internal Ops Assistant POC Workflows (Sympla)
 
 Approved workflows for this proof of concept:
 
-1. service_status
-   - Purpose: Check whether a known service or dependency is healthy.
+1. sympla_list_events
+   - Purpose: List organizer events from Sympla.
    - Risk: Read-only.
 
-2. record_lookup
-   - Purpose: Look up a ticket, account, device, or job record.
+2. sympla_lookup_participant_by_ticket
+   - Purpose: Look up a Sympla participant using an event ID and ticket number.
    - Risk: Read-only.
 
-3. failures_summary
-   - Purpose: Summarize today's failures or exception signals.
-   - Risk: Read-only.
-
-4. low_risk_remediation
-   - Purpose: Run a low-risk recovery action such as a restart or cache clear.
-   - Risk: Write action. Explicit human confirmation required.
-
-5. incident_escalation
-   - Purpose: Create an escalation payload or incident handoff with context.
+3. sympla_checkin_participant
+   - Purpose: Perform a participant check-in in Sympla using an event ID and ticket number.
    - Risk: Write action. Explicit human confirmation required.
 EOF
 
@@ -139,7 +157,7 @@ echo "=== Creating n8n ops workflow skill ==="
 cat > /root/.openclaw/workspace/skills/n8n-ops-workflows/SKILL.md << EOF
 ---
 name: n8n-ops-workflows
-description: Trigger approved internal operations workflows through n8n. Use this for service checks, record lookups, failures summaries, low-risk remediation, and incident escalation.
+description: Trigger approved Sympla-backed workflows through n8n. Use this for event listing, participant lookup by ticket number, and gated participant check-in.
 ---
 
 # Approved workflow endpoint
@@ -154,11 +172,9 @@ All requests MUST include:
 
 ## Approved workflows
 
-- \`service_status\` for read-only service health checks
-- \`record_lookup\` for read-only ticket, account, device, or job lookups
-- \`failures_summary\` for read-only summaries of failures or exceptions
-- \`low_risk_remediation\` for controlled low-risk write actions
-- \`incident_escalation\` for escalation or handoff payload generation
+- \`sympla_list_events\` for read-only event listing
+- \`sympla_lookup_participant_by_ticket\` for read-only participant lookup using \`event_id\` and \`ticket_number\`
+- \`sympla_checkin_participant\` for a gated participant check-in action
 
 ## Request contract
 
@@ -166,14 +182,22 @@ Send JSON with this shape:
 
 \`\`\`json
 {
-  "workflow": "service_status",
-  "summary": "why this workflow is being used",
+  "workflow": "sympla_lookup_participant_by_ticket",
+  "summary": "why this Sympla workflow is being used",
   "requiresConfirmation": false,
   "data": {
-    "target": "service-or-record-id"
+    "event_id": "123456",
+    "ticket_number": "QHWA-1Q-3G0J",
+    "confirmed": false
   }
 }
 \`\`\`
+
+## Authentication model
+
+- The operator should never be asked for the Sympla \`S_TOKEN\` in Telegram.
+- \`n8n\` reads the Sympla token from its runtime environment.
+- This keeps Telegram focused on operator inputs such as \`event_id\`, \`ticket_number\`, and explicit confirmation.
 
 ## How to call it
 
@@ -183,14 +207,15 @@ Use the \`exec\` tool with curl:
 curl -X POST "http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}" \\
   -H "Content-Type: application/json" \\
   -H "X-Webhook-Secret: ${N8N_WEBHOOK_SECRET}" \\
-  -d '{"workflow":"service_status","summary":"Check API health for the operator","requiresConfirmation":false,"data":{"target":"payments-api"}}'
+  -d '{"workflow":"sympla_lookup_participant_by_ticket","summary":"Check a participant by ticket number","requiresConfirmation":false,"data":{"event_id":"123456","ticket_number":"QHWA-1Q-3G0J","confirmed":false}}'
 \`\`\`
 
 ## Safety rules
 
 - Only use approved workflow names.
 - Ask for missing identifiers before running the workflow.
-- Set \`requiresConfirmation\` to \`true\` for \`low_risk_remediation\` and \`incident_escalation\`.
+- Use \`requiresConfirmation: true\` for \`sympla_checkin_participant\`.
+- Only execute \`sympla_checkin_participant\` when the operator has explicitly confirmed the action.
 - Never invent workflow results. Report tool failures clearly.
 EOF
 
@@ -227,11 +252,15 @@ POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=n8n
 N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
 OPENAI_API_KEY=${OPENAI_API_KEY}
+SYMPLA_BASE_URL=https://api.sympla.com.br/public/v1.5.1
+SYMPLA_S_TOKEN=${SYMPLA_S_TOKEN}
 N8N_HOST=${N8N_HOST}
 N8N_PORT=${N8N_PORT}
 N8N_PROTOCOL=${N8N_PROTOCOL}
 N8N_BASE_URL=${N8N_BASE_URL}
 N8N_EDITOR_BASE_URL=${N8N_BASE_URL}
+N8N_WEBHOOK_PATH=${N8N_WEBHOOK_PATH}
+N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
 EOF
 
 echo "=== Creating docker-compose.yml ==="
@@ -278,11 +307,16 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
       - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
       - WEBHOOK_URL=${N8N_BASE_URL}/
+      - SYMPLA_BASE_URL=${SYMPLA_BASE_URL}
+      - SYMPLA_S_TOKEN=${SYMPLA_S_TOKEN}
+      - N8N_WEBHOOK_PATH=${N8N_WEBHOOK_PATH}
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
       - N8N_LISTEN_ADDRESS=0.0.0.0
       - N8N_SECURE_COOKIE=false
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
@@ -311,11 +345,16 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
       - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
       - WEBHOOK_URL=${N8N_BASE_URL}/
+      - SYMPLA_BASE_URL=${SYMPLA_BASE_URL}
+      - SYMPLA_S_TOKEN=${SYMPLA_S_TOKEN}
+      - N8N_WEBHOOK_PATH=${N8N_WEBHOOK_PATH}
+      - N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
       - N8N_LISTEN_ADDRESS=0.0.0.0
       - N8N_SECURE_COOKIE=false
       - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
@@ -378,12 +417,17 @@ echo "----------------------------------------"
 echo "OpenClaw Gateway Token: ${GATEWAY_TOKEN}"
 echo "----------------------------------------"
 echo ""
+if [ -n "${SYMPLA_S_TOKEN}" ]; then
+  echo "Sympla token configured: yes"
+else
+  echo "Sympla token configured: no"
+fi
+echo "Sympla base URL: https://api.sympla.com.br/public/v1.5.1"
+echo ""
 echo "POC workflows:"
-echo "  - service_status"
-echo "  - record_lookup"
-echo "  - failures_summary"
-echo "  - low_risk_remediation"
-echo "  - incident_escalation"
+echo "  - sympla_list_events"
+echo "  - sympla_lookup_participant_by_ticket"
+echo "  - sympla_checkin_participant"
 echo ""
 echo "To send messages from n8n to OpenClaw/Telegram:"
 echo ""
@@ -398,6 +442,7 @@ echo ""
 echo "Next steps:"
 echo "  1. Open ${N8N_BASE_URL}"
 echo "  2. Create your n8n owner account"
-echo "  3. Build the webhook workflow using the generated path and secret"
-echo "  4. Message your Telegram bot to test the assistant"
+echo "  3. Import the Sympla n8n workflow template from this repository"
+echo "  4. Update the webhook path in n8n to ${N8N_WEBHOOK_PATH}"
+echo "  5. Message your Telegram bot to test the assistant"
 echo ""

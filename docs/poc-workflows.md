@@ -1,160 +1,127 @@
 # POC Workflow Catalog
 
-This document defines the recommended first workflow set for the local Ubuntu operations assistant proof of concept.
+This document defines the first Sympla-backed workflow set for the local Ubuntu operations assistant proof of concept.
 
-Each workflow is intentionally narrow, demo-friendly, and easy to explain to stakeholders.
+Each workflow is intentionally narrow, demo-friendly, and tied to a real Sympla API endpoint.
 
 ## Design Rules
 
-- Start with workflows that are easy to verify.
+- Start with workflows that are easy to verify live.
 - Prefer read-only actions first.
 - Require explicit confirmation before any state-changing action.
-- Return structured output instead of raw logs.
-- Keep each workflow backed by a specific internal script, API, or query.
+- Keep API credentials out of Telegram prompts.
+- Return structured operator summaries instead of raw API JSON.
 
-## Workflow 1: `service_status`
+## Workflow 1: `sympla_list_events`
 
 **Purpose**
 
-Check whether a known service, endpoint, queue, or dependency is healthy.
+List the organizer events available through the Sympla API.
+
+**Sympla endpoint**
+
+`GET /events`
 
 **Typical prompt**
 
-`Check the status of the payments API.`
+`List my current Sympla events.`
 
 **Suggested inputs**
 
-- `target`
-- `environment`
+- none required for the first version
 
 **Suggested output**
 
-- status: healthy, degraded, or down
-- key findings
-- last check timestamp
+- status
+- total events found
+- top few event names and identifiers
 - next suggested step
 
 **Risk**
 
 Read-only
 
-## Workflow 2: `record_lookup`
+## Workflow 2: `sympla_lookup_participant_by_ticket`
 
 **Purpose**
 
-Look up a ticket, account, device, job, or batch record in an internal system.
+Look up a participant using an event ID and ticket number.
+
+**Sympla endpoint**
+
+`GET /events/{{event_id}}/participants/ticketNumber/{{ticket_number}}`
 
 **Typical prompt**
 
-`Look up ticket OPS-4312 and summarize the latest update.`
+`Look up ticket QHWA-1Q-3G0J for event 123456.`
 
 **Suggested inputs**
 
-- `recordType`
-- `recordId`
+- `event_id`
+- `ticket_number`
 
 **Suggested output**
 
-- record found or not found
-- summary of current state
-- owner or assignee
-- last updated timestamp
+- participant found or not found
+- participant/ticket details
+- check-in status if present
+- next suggested step
 
 **Risk**
 
 Read-only
 
-## Workflow 3: `failures_summary`
+## Workflow 3: `sympla_checkin_participant`
 
 **Purpose**
 
-Summarize failures, exceptions, or alerts for the current day or a requested window.
+Perform a participant check-in using an event ID and ticket number.
+
+**Sympla endpoint**
+
+`POST /events/{{event_id}}/participants/ticketNumber/{{ticket_number}}/checkin`
 
 **Typical prompt**
 
-`Summarize failed jobs from today.`
+`Check in ticket QHWA-1Q-3G0J for event 123456.`
 
 **Suggested inputs**
 
-- `source`
-- `timeWindow`
-- `severity`
+- `event_id`
+- `ticket_number`
+- explicit confirmation
 
 **Suggested output**
 
-- total failures
-- grouped causes
-- most recent failure
-- suggested operator follow-up
-
-**Risk**
-
-Read-only
-
-## Workflow 4: `low_risk_remediation`
-
-**Purpose**
-
-Execute a controlled low-risk action such as restarting a service, clearing a cache, or re-running a job.
-
-**Typical prompt**
-
-`Restart the staging worker service.`
-
-**Suggested inputs**
-
-- `target`
-- `environment`
-- `requestedAction`
-
-**Suggested output**
-
-- confirmation received
-- action taken
-- outcome
-- rollback or next check
+- confirmation requested or received
+- check-in executed or blocked
+- Sympla outcome
+- next suggested step
 
 **Risk**
 
 Write action. Explicit operator confirmation required before execution.
 
-## Workflow 5: `incident_escalation`
+## Credential Model
 
-**Purpose**
+The operator should not be asked for the Sympla `S_TOKEN` in Telegram.
 
-Create an escalation record or handoff payload with a concise summary of the issue.
+Instead:
 
-**Typical prompt**
-
-`Create an incident escalation for the overnight queue failures.`
-
-**Suggested inputs**
-
-- `incidentTitle`
-- `summary`
-- `affectedSystem`
-- `severity`
-
-**Suggested output**
-
-- escalation prepared or created
-- summary used
-- destination team or queue
-- reference ID
-
-**Risk**
-
-Write action. Explicit operator confirmation required before execution.
+- store `SYMPLA_S_TOKEN` in the local runtime configuration
+- let `n8n` inject the `S_TOKEN` header automatically
+- keep the Telegram conversation focused on business inputs such as `event_id`, `ticket_number`, and confirmation
 
 ## Suggested n8n Pattern
 
 Use one inbound webhook and route on the `workflow` field:
 
 1. Webhook node receives the OpenClaw payload.
-2. Switch node branches on `workflow`.
-3. Each branch calls one internal tool or API wrapper.
-4. A final formatter node builds a short structured result.
-5. An HTTP Request node sends the result back through `sessions_send`.
+2. Validate the `X-Webhook-Secret`.
+3. Switch node branches on `workflow`.
+4. Each branch calls the relevant Sympla endpoint with `S_TOKEN` from environment.
+5. A formatter node builds a short structured result.
+6. An HTTP Request node sends the result back through `sessions_send`.
 
 ## Response Format
 
@@ -165,4 +132,4 @@ Keep replies concise and operator-friendly:
 - `Action taken`
 - `Next step`
 
-This makes the POC feel operational rather than like a generic chatbot.
+This keeps the POC useful for operators and easy to demo.
