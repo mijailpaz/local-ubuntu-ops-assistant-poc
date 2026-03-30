@@ -54,10 +54,8 @@ This is meant for evaluation on a trusted machine or LAN, not internet-facing pr
 Clone the repo onto your Ubuntu machine and run:
 
 ```bash
-cp .env.example .env
-# edit .env with any values you already know
-chmod +x setup.sh
-sudo ./setup.sh
+make init
+make setup
 ```
 
 The repo-local `.env` file is only used as installer input defaults. The generated runtime file still lives at `/opt/openclaw/.env`.

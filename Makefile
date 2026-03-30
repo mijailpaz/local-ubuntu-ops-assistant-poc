@@ -1,10 +1,11 @@
-.PHONY: help check-stack setup start stop restart recreate recreate-gateway logs logs-openclaw logs-n8n ps config pull cleanup reset reboot-host
+.PHONY: help init check-stack setup start stop restart recreate recreate-gateway logs logs-openclaw logs-n8n ps config pull cleanup reset reboot-host
 
 STACK_DIR ?= /opt/openclaw
 COMPOSE_CMD = sudo docker compose --env-file "$(STACK_DIR)/.env" -f "$(STACK_DIR)/docker-compose.yml"
 
 help:
 	@echo "Common commands:"
+	@echo "  make init             Create .env from .env.example and edit it in nano"
 	@echo "  make setup            Run the local Ubuntu installer"
 	@echo "  make start            Start the stack"
 	@echo "  make stop             Stop the stack"
@@ -20,6 +21,10 @@ help:
 	@echo "  make cleanup          Remove stopped containers and unused volumes"
 	@echo "  make reset            Remove the stack and local state"
 	@echo "  make reboot-host      Reboot the Ubuntu machine"
+
+init:
+	@if [ ! -f .env ]; then cp .env.example .env; fi
+	nano .env
 
 check-stack:
 	@test -f "$(STACK_DIR)/docker-compose.yml" || (echo "Missing $(STACK_DIR)/docker-compose.yml. Run 'make setup' first."; exit 1)
