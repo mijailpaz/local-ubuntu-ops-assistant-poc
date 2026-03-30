@@ -1,143 +1,243 @@
-# OpenClaw + n8n Starter
+# Local Ubuntu Ops Assistant POC
 
-One-command deployment of OpenClaw AI agent with n8n workflow automation on Digital Ocean.
+Telegram-first proof of concept for running an internal operations assistant on a local Ubuntu machine with OpenClaw and n8n.
 
-## What You Get
+## What This POC Demonstrates
 
-- **OpenClaw** - AI agent accessible via Telegram
-- **n8n** - Workflow automation with web UI
-- **Caddy** - Automatic HTTPS
-- **PostgreSQL** - Database for n8n
-- **Redis** - Queue for n8n workers
+- **OpenClaw** as the chat-facing assistant for internal operators
+- **Telegram** as the simplest officer interface for a one-user or small allowlist pilot
+- **n8n** as the workflow and tool orchestration layer
+- **PostgreSQL + Redis** for n8n persistence and queue execution
+- **Local Ubuntu** hosting so the assistant can sit near internal tools and data sources
 
 ## Architecture
 
-```
-Internet
+```text
+Operations officer
     │
-    ├─── Telegram ──────────► OpenClaw (internal only)
-    │                              │
-    │                              ▼
-    └─── HTTPS ──► Caddy ──► n8n ◄─┘
+    └── Telegram ───────► OpenClaw gateway
                               │
                               ▼
-                    PostgreSQL + Redis (internal)
+                            n8n
+                              │
+                              ▼
+               Internal APIs, scripts, and data sources
 ```
 
-**Security:**
-- OpenClaw is NOT exposed to the internet (only accessible internally)
-- n8n webhooks protected with header authentication
-- PostgreSQL/Redis on isolated internal network
+## Why This Version Is Local-First
+
+This starter is intentionally optimized for easy proof-of-concept testing on one Ubuntu machine:
+
+- No DigitalOcean dependency
+- No public `nip.io` hostname requirement
+- No HTTPS reverse proxy required for the first demo
+- OpenClaw remains internal to the Docker network
+- n8n is exposed over local HTTP for quick setup
+
+This is meant for evaluation on a trusted machine or LAN, not internet-facing production.
 
 ## Prerequisites
 
-1. **Digital Ocean Droplet** - Ubuntu 24.04, 2GB+ RAM recommended
-2. **Telegram Bot Token** - Get from [@BotFather](https://t.me/botfather)
-3. **Telegram User ID** - Get from [@userinfobot](https://t.me/userinfobot)
-4. **OpenAI API Key** - Get from [OpenAI](https://platform.openai.com/api-keys)
+1. **Ubuntu 24.04 or similar** with sudo/root access and 2GB+ RAM recommended
+2. **Telegram Bot Token** from [@BotFather](https://t.me/botfather)
+3. **Telegram User ID** from [@userinfobot](https://t.me/userinfobot)
+4. **OpenAI API Key** from [OpenAI](https://platform.openai.com/api-keys)
+5. **Network access from the Ubuntu machine** to:
+   - Telegram
+   - OpenAI
+   - any internal systems you want the POC to call
 
 ## Installation
 
-SSH into your droplet and run:
+Clone the repo onto your Ubuntu machine and run:
 
 ```bash
-curl -sL https://raw.githubusercontent.com/Barty-Bart/openclaw-n8n-starter/main/setup.sh -o setup.sh
 chmod +x setup.sh
-./setup.sh
+sudo ./setup.sh
 ```
 
 The script will ask for:
+
 - Telegram Bot Token
-- Telegram User ID  
+- Telegram User ID
 - OpenAI API Key
-- Droplet IP (auto-detected)
+- Local hostname or IP address to use for the n8n UI
+
+The installer will:
+
+- install Docker and Docker Compose
+- build OpenClaw locally
+- create a Telegram-only OpenClaw config with an allowlist
+- create a local n8n + Postgres + Redis stack
+- add a workflow catalog and guardrail skills into the OpenClaw workspace
 
 ## After Installation
 
-1. **Access n8n**: `https://n8n.YOUR_IP.nip.io`
-2. **Message your Telegram bot** to start chatting with OpenClaw
-3. **Create workflows** in n8n that OpenClaw can trigger
+1. Open n8n at `http://YOUR_HOST_OR_IP:5678`
+2. Create the initial n8n owner account in the browser
+3. Message your Telegram bot
+4. Build or import the POC workflows in n8n
+5. Test one read-only flow before trying any write action
 
-## Connecting n8n ↔ OpenClaw
+## POC Workflow Set
 
-### OpenClaw → n8n (trigger workflows)
+The installer seeds the assistant workspace with a recommended workflow catalog:
 
-OpenClaw has an `n8n-webhook` skill. Ask it to trigger your workflow and it will call the webhook.
+- `service_status`
+- `record_lookup`
+- `failures_summary`
+- `low_risk_remediation`
+- `incident_escalation`
 
-In n8n, create a Webhook node with:
+These are designed to demonstrate operational usefulness without starting with high-risk automation.
+
+Detailed workflow guidance lives in [docs/poc-workflows.md](docs/poc-workflows.md).
+
+## Connecting OpenClaw To n8n
+
+The installer creates an OpenClaw skill named `n8n-ops-workflows` that calls an authenticated n8n webhook.
+
+In n8n, create a **Webhook** node with:
+
 - **Authentication**: Header Auth
 - **Header Name**: `X-Webhook-Secret`
-- **Header Value**: (shown after install)
+- **Header Value**: the generated value printed at the end of `setup.sh`
+- **Path**: the generated webhook path printed at the end of `setup.sh`
 
-### n8n → OpenClaw (send Telegram messages)
+The assistant will send payloads in this shape:
 
-Use HTTP Request node in n8n:
+```json
+{
+  "workflow": "service_status",
+  "summary": "Check API health for the operator",
+  "requiresConfirmation": false,
+  "data": {
+    "target": "payments-api"
+  }
+}
+```
+
+## Sending Messages Back To Telegram
+
+Use an **HTTP Request** node in n8n:
 
 - **URL**: `http://openclaw-gateway:18789/tools/invoke`
-- **Method**: POST
+- **Method**: `POST`
 - **Headers**:
-  - `Authorization`: `Bearer YOUR_GATEWAY_TOKEN`
-  - `Content-Type`: `application/json`
-- **Body**:
+  - `Authorization: Bearer YOUR_GATEWAY_TOKEN`
+  - `Content-Type: application/json`
+
+Example body:
+
 ```json
 {
   "tool": "sessions_send",
   "args": {
     "sessionKey": "agent:main:main",
-    "message": "Hello from n8n!",
+    "message": "Status: healthy. Findings: all checks passed.",
     "timeoutSeconds": 0
   }
 }
 ```
 
+## Guardrails In This POC
+
+This repo now assumes a narrow internal-ops demo rather than an unrestricted assistant:
+
+- Telegram access is limited to an allowlist
+- Read-only workflows come first
+- Write actions require explicit confirmation
+- The webhook contract uses approved workflow names instead of arbitrary tasks
+- n8n is used as the control point for internal actions
+
+Recommended behavior guidance lives in [docs/demo-checklist.md](docs/demo-checklist.md).
+
+## Local Testing Notes
+
+- n8n is served over HTTP on the local machine for simplicity
+- The setup disables secure cookies for n8n because this POC is not using HTTPS
+- If you need public inbound webhooks later, add a tunnel, reverse proxy, or VPN layer
+- For a production deployment, reintroduce HTTPS, stronger network controls, secrets management, and audited approval flows
+
 ## Useful Commands
 
 ```bash
-# View logs
+# View all logs
 cd /opt/openclaw
 docker compose logs -f
 
-# Restart services
+# Restart the stack
 docker compose restart
 
 # Stop everything
 docker compose down
 
-# Start everything
+# Start everything again
 docker compose up -d
 
-# Check OpenClaw skills
-docker compose run --rm openclaw-cli skills list
+# Inspect OpenClaw logs only
+docker compose logs openclaw-gateway
+
+# Inspect n8n logs only
+docker compose logs n8n n8n-worker
 ```
 
 ## Troubleshooting
 
-**Bot not responding?**
+**Telegram bot not responding?**
+
 ```bash
+cd /opt/openclaw
 docker compose logs openclaw-gateway
 ```
 
+Check:
+
+- the Telegram bot token is correct
+- your Telegram user ID matches the allowlist
+- the machine has outbound access to Telegram and OpenAI
+
 **n8n not loading?**
+
 ```bash
-docker compose logs caddy
+cd /opt/openclaw
 docker compose logs n8n
 ```
 
+Check:
+
+- you are opening the correct local URL
+- port `5678` is reachable on the machine
+- you completed the initial owner setup flow
+
 **Webhook not working?**
-- Check the webhook path matches
-- Check the X-Webhook-Secret header is correct
-- Use internal URL: `http://n8n:5678/webhook/...`
 
-## ⚠️ Disclaimer
+Check:
 
-**Use at your own risk.** I've tried to make this secure, but it is NOT 100% perfect.
+- the webhook path matches the generated value
+- the `X-Webhook-Secret` header is correct
+- the workflow name is one of the approved POC names
+- n8n can reach `http://openclaw-gateway:18789/tools/invoke`
 
-This is great for **testing and learning**. For **production use**, you'll need to do additional security hardening yourself.
+## Next Docs
 
-I'm not responsible for any issues, data loss, security breaches, etc.
+- [docs/poc-workflows.md](docs/poc-workflows.md)
+- [docs/demo-checklist.md](docs/demo-checklist.md)
+- [docs/production-concerns.md](docs/production-concerns.md)
+
+## Disclaimer
+
+This project is for testing and stakeholder demos. It is not production-ready as-is.
+
+Before real internal deployment, you should add:
+
+- HTTPS
+- tighter host and network controls
+- proper secrets management
+- approval and audit workflows
+- least-privilege service integrations
 
 ## Credits
 
 - [OpenClaw](https://github.com/openclaw/openclaw)
 - [n8n](https://n8n.io)
-- Setup by [Bart S](https://www.youtube.com/@BartSlodyczka)

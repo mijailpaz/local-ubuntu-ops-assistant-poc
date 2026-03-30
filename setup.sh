@@ -1,29 +1,39 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
+if [ "${EUID}" -ne 0 ]; then
+  echo "Please run this script with sudo or as root."
+  exit 1
+fi
 
 echo ""
-echo "========================================"
-echo "  OpenClaw + n8n Stack Setup"
-echo "  Secure, isolated deployment"
-echo "========================================"
+echo "==============================================="
+echo "  Local Ubuntu OpenClaw + n8n Ops Assistant"
+echo "  Telegram-first POC bootstrap"
+echo "==============================================="
 echo ""
 
 #######################################
 # COLLECT USER INPUT
 #######################################
 
-read -p "Enter your Telegram Bot Token: " TELEGRAM_BOT_TOKEN
-read -p "Enter your Telegram User ID: " TELEGRAM_USER_ID
-read -p "Enter your OpenAI API Key: " OPENAI_API_KEY
+read -r -p "Enter your Telegram Bot Token: " TELEGRAM_BOT_TOKEN
+read -r -p "Enter your Telegram User ID: " TELEGRAM_USER_ID
+read -r -p "Enter your OpenAI API Key: " OPENAI_API_KEY
 
-# Auto-detect IP
-DETECTED_IP=$(curl -s ifconfig.me)
-read -p "Enter your Droplet IP [${DETECTED_IP}]: " DROPLET_IP
-DROPLET_IP=${DROPLET_IP:-$DETECTED_IP}
-DOMAIN_NAME="${DROPLET_IP}.nip.io"
+DEFAULT_HOST="$(hostname -I 2>/dev/null | awk '{print $1}')"
+if [ -z "${DEFAULT_HOST}" ]; then
+  DEFAULT_HOST="$(hostname -f 2>/dev/null || hostname)"
+fi
+
+read -r -p "Enter the local hostname or IP for n8n [${DEFAULT_HOST}]: " N8N_HOST
+N8N_HOST=${N8N_HOST:-$DEFAULT_HOST}
+N8N_PORT=5678
+N8N_PROTOCOL=http
+N8N_BASE_URL="${N8N_PROTOCOL}://${N8N_HOST}:${N8N_PORT}"
 
 echo ""
-echo "Using domain: ${DOMAIN_NAME}"
+echo "n8n will be available at: ${N8N_BASE_URL}"
 echo ""
 
 #######################################
@@ -36,22 +46,23 @@ N8N_WEBHOOK_SECRET=$(openssl rand -hex 32)
 N8N_WEBHOOK_PATH=$(cat /proc/sys/kernel/random/uuid)
 
 echo "=== Installing dependencies ==="
-apt update && apt install -y docker.io docker-compose-v2 ufw git
+apt update
+apt install -y docker.io docker-compose-v2 git curl openssl
 
-echo "=== Configuring firewall ==="
-ufw allow 22    # SSH
-ufw allow 80    # HTTP
-ufw allow 443   # HTTPS
-ufw --force enable
+echo "=== Preparing Docker ==="
+systemctl enable docker
+systemctl start docker
 
 echo "=== Creating directories ==="
 mkdir -p /opt/openclaw
-mkdir -p /opt/clawdbot/caddy_config
-mkdir -p /opt/clawdbot/local_files
-mkdir -p /root/.openclaw/workspace/skills/n8n-webhook
+mkdir -p /root/.openclaw/workspace/skills/n8n-ops-workflows
+mkdir -p /root/.openclaw/workspace/skills/ops-guardrails
+mkdir -p /root/.openclaw/workspace/playbooks
 
 echo "=== Building OpenClaw from source ==="
-git clone https://github.com/openclaw/openclaw.git /opt/openclaw-src
+if [ ! -d /opt/openclaw-src/.git ]; then
+  git clone https://github.com/openclaw/openclaw.git /opt/openclaw-src
+fi
 cd /opt/openclaw-src
 docker build -t openclaw:local .
 cd /opt/openclaw
@@ -99,68 +110,139 @@ cat > /root/.openclaw/openclaw.json << EOF
 }
 EOF
 
-echo "=== Creating n8n webhook skill ==="
-cat > /root/.openclaw/workspace/skills/n8n-webhook/SKILL.md << EOF
+echo "=== Creating POC workflow catalog ==="
+cat > /root/.openclaw/workspace/playbooks/poc-workflows.md << EOF
+# Internal Ops Assistant POC Workflows
+
+Approved workflows for this proof of concept:
+
+1. service_status
+   - Purpose: Check whether a known service or dependency is healthy.
+   - Risk: Read-only.
+
+2. record_lookup
+   - Purpose: Look up a ticket, account, device, or job record.
+   - Risk: Read-only.
+
+3. failures_summary
+   - Purpose: Summarize today's failures or exception signals.
+   - Risk: Read-only.
+
+4. low_risk_remediation
+   - Purpose: Run a low-risk recovery action such as a restart or cache clear.
+   - Risk: Write action. Explicit human confirmation required.
+
+5. incident_escalation
+   - Purpose: Create an escalation payload or incident handoff with context.
+   - Risk: Write action. Explicit human confirmation required.
+EOF
+
+echo "=== Creating n8n ops workflow skill ==="
+cat > /root/.openclaw/workspace/skills/n8n-ops-workflows/SKILL.md << EOF
 ---
-name: n8n-webhook
-description: Trigger n8n workflows via webhook. Use this when you need to execute automations, run workflows, or integrate with external services through n8n.
+name: n8n-ops-workflows
+description: Trigger approved internal operations workflows through n8n. Use this for service checks, record lookups, failures summaries, low-risk remediation, and incident escalation.
 ---
 
-# n8n Webhook Integration
+# Approved workflow endpoint
 
-## Endpoint
 Internal URL: \`http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}\`
 
 ## Authentication
-All requests MUST include this header:
+
+All requests MUST include:
 - Header: \`X-Webhook-Secret\`
 - Value: \`${N8N_WEBHOOK_SECRET}\`
 
-## How to use
-Use the \`exec\` tool to call the n8n webhook with curl:
+## Approved workflows
+
+- \`service_status\` for read-only service health checks
+- \`record_lookup\` for read-only ticket, account, device, or job lookups
+- \`failures_summary\` for read-only summaries of failures or exceptions
+- \`low_risk_remediation\` for controlled low-risk write actions
+- \`incident_escalation\` for escalation or handoff payload generation
+
+## Request contract
+
+Send JSON with this shape:
+
+\`\`\`json
+{
+  "workflow": "service_status",
+  "summary": "why this workflow is being used",
+  "requiresConfirmation": false,
+  "data": {
+    "target": "service-or-record-id"
+  }
+}
+\`\`\`
+
+## How to call it
+
+Use the \`exec\` tool with curl:
 
 \`\`\`bash
 curl -X POST "http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}" \\
   -H "Content-Type: application/json" \\
   -H "X-Webhook-Secret: ${N8N_WEBHOOK_SECRET}" \\
-  -d '{"task": "description of what to do", "data": {}}'
+  -d '{"workflow":"service_status","summary":"Check API health for the operator","requiresConfirmation":false,"data":{"target":"payments-api"}}'
 \`\`\`
 
-## Notes
-- Always include the X-Webhook-Secret header or the request will fail
-- Send JSON payload describing the task or data
-- n8n will process the workflow and return a response
+## Safety rules
+
+- Only use approved workflow names.
+- Ask for missing identifiers before running the workflow.
+- Set \`requiresConfirmation\` to \`true\` for \`low_risk_remediation\` and \`incident_escalation\`.
+- Never invent workflow results. Report tool failures clearly.
 EOF
 
-echo "=== Creating Caddyfile ==="
-cat > /opt/clawdbot/caddy_config/Caddyfile << EOF
-n8n.${DOMAIN_NAME} {
-    reverse_proxy n8n:5678
-}
+echo "=== Creating ops guardrail skill ==="
+cat > /root/.openclaw/workspace/skills/ops-guardrails/SKILL.md << EOF
+---
+name: ops-guardrails
+description: Guardrails for an internal operations assistant proof of concept. Use this when handling operational requests or before triggering a workflow.
+---
+
+# Operating rules
+
+- Treat the user as an authenticated internal operator only if they are on the Telegram allowlist.
+- Prefer read-only workflows first.
+- Before any write action, summarize the intended impact and ask for explicit confirmation.
+- If a request is ambiguous, ask a clarifying question instead of guessing.
+- If a tool is unavailable or unauthorized, say so plainly.
+
+# Response style
+
+Return concise, structured responses with:
+- Status
+- Findings
+- Action taken
+- Suggested next step
 EOF
 
 echo "=== Creating .env file ==="
 cat > /opt/openclaw/.env << EOF
 OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
-N8N_SUBDOMAIN=n8n
-DOMAIN_NAME=${DOMAIN_NAME}
 POSTGRES_USER=n8n
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=n8n
 N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
 OPENAI_API_KEY=${OPENAI_API_KEY}
+N8N_HOST=${N8N_HOST}
+N8N_PORT=${N8N_PORT}
+N8N_PROTOCOL=${N8N_PROTOCOL}
+N8N_BASE_URL=${N8N_BASE_URL}
+N8N_EDITOR_BASE_URL=${N8N_BASE_URL}
 EOF
 
 echo "=== Creating docker-compose.yml ==="
 cat > /opt/openclaw/docker-compose.yml << 'COMPOSEFILE'
 networks:
-  frontend:
   backend:
     internal: true
   egress:
 
 volumes:
-  caddy_data:
   n8n_data:
   postgres_data:
 
@@ -180,26 +262,15 @@ services:
     volumes:
       - /root/.openclaw:/home/node/.openclaw
     networks:
+      - backend
       - egress
 
-  caddy:
-    image: caddy:2-alpine
-    container_name: caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - /opt/clawdbot/caddy_config/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - /opt/clawdbot/local_files:/srv
-    networks:
-      - frontend
-
   n8n:
-    image: n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:latest
     container_name: n8n
     restart: unless-stopped
+    ports:
+      - "${N8N_PORT}:5678"
     environment:
       - DB_TYPE=postgresdb
       - DB_POSTGRESDB_HOST=postgres
@@ -208,23 +279,28 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
+      - WEBHOOK_URL=${N8N_BASE_URL}/
+      - N8N_LISTEN_ADDRESS=0.0.0.0
+      - N8N_SECURE_COOKIE=false
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
       - EXECUTIONS_MODE=queue
       - QUEUE_BULL_REDIS_HOST=redis
-      - N8N_HOST=n8n.${DOMAIN_NAME}
-      - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://n8n.${DOMAIN_NAME}/
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
       - postgres
       - redis
     networks:
-      - frontend
       - backend
       - egress
 
   n8n-worker:
-    image: n8nio/n8n:latest
+    image: docker.n8n.io/n8nio/n8n:latest
     container_name: n8n-worker
     restart: unless-stopped
     command: worker
@@ -236,6 +312,15 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=${N8N_PROTOCOL}
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL}
+      - WEBHOOK_URL=${N8N_BASE_URL}/
+      - N8N_LISTEN_ADDRESS=0.0.0.0
+      - N8N_SECURE_COOKIE=false
+      - N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true
+      - N8N_RUNNERS_ENABLED=true
       - EXECUTIONS_MODE=queue
       - QUEUE_BULL_REDIS_HOST=redis
     volumes:
@@ -280,18 +365,26 @@ echo "========================================"
 echo "  SETUP COMPLETE!"
 echo "========================================"
 echo ""
-echo "n8n URL: https://n8n.${DOMAIN_NAME}"
+echo "n8n URL: ${N8N_BASE_URL}"
+echo "Complete the n8n owner account setup in your browser after the stack starts."
 echo ""
 echo "----------------------------------------"
 echo "n8n Webhook Configuration:"
 echo "----------------------------------------"
-echo "  Webhook Path: ${N8N_WEBHOOK_PATH}"
+echo "  Webhook URL: http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}"
 echo "  Header Auth Name: X-Webhook-Secret"
 echo "  Header Auth Value: ${N8N_WEBHOOK_SECRET}"
 echo ""
 echo "----------------------------------------"
 echo "OpenClaw Gateway Token: ${GATEWAY_TOKEN}"
 echo "----------------------------------------"
+echo ""
+echo "POC workflows:"
+echo "  - service_status"
+echo "  - record_lookup"
+echo "  - failures_summary"
+echo "  - low_risk_remediation"
+echo "  - incident_escalation"
 echo ""
 echo "To send messages from n8n to OpenClaw/Telegram:"
 echo ""
@@ -303,7 +396,9 @@ echo "    Content-Type: application/json"
 echo "  Body:"
 echo '    {"tool":"sessions_send","args":{"sessionKey":"agent:main:main","message":"Hello from n8n!","timeoutSeconds":0}}'
 echo ""
-echo "----------------------------------------"
-echo "SAVE THESE VALUES - You will need them!"
-echo "----------------------------------------"
+echo "Next steps:"
+echo "  1. Open ${N8N_BASE_URL}"
+echo "  2. Create your n8n owner account"
+echo "  3. Build the webhook workflow using the generated path and secret"
+echo "  4. Message your Telegram bot to test the assistant"
 echo ""
