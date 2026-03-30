@@ -31,9 +31,11 @@ N8N_HOST=${N8N_HOST:-$DEFAULT_HOST}
 N8N_PORT=5678
 N8N_PROTOCOL=http
 N8N_BASE_URL="${N8N_PROTOCOL}://${N8N_HOST}:${N8N_PORT}"
+OPENCLAW_IMAGE=${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
 
 echo ""
 echo "n8n will be available at: ${N8N_BASE_URL}"
+echo "OpenClaw image: ${OPENCLAW_IMAGE}"
 echo ""
 
 #######################################
@@ -47,7 +49,7 @@ N8N_WEBHOOK_PATH=$(cat /proc/sys/kernel/random/uuid)
 
 echo "=== Installing dependencies ==="
 apt update
-apt install -y docker.io docker-compose-v2 git curl openssl
+apt install -y docker.io docker-compose-v2 curl openssl
 
 echo "=== Preparing Docker ==="
 systemctl enable docker
@@ -59,12 +61,8 @@ mkdir -p /root/.openclaw/workspace/skills/n8n-ops-workflows
 mkdir -p /root/.openclaw/workspace/skills/ops-guardrails
 mkdir -p /root/.openclaw/workspace/playbooks
 
-echo "=== Building OpenClaw from source ==="
-if [ ! -d /opt/openclaw-src/.git ]; then
-  git clone https://github.com/openclaw/openclaw.git /opt/openclaw-src
-fi
-cd /opt/openclaw-src
-docker build -t openclaw:local .
+echo "=== Pulling OpenClaw image ==="
+docker pull "${OPENCLAW_IMAGE}"
 cd /opt/openclaw
 
 echo "=== Creating OpenClaw config ==="
@@ -223,6 +221,7 @@ EOF
 echo "=== Creating .env file ==="
 cat > /opt/openclaw/.env << EOF
 OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
+OPENCLAW_IMAGE=${OPENCLAW_IMAGE}
 POSTGRES_USER=n8n
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=n8n
@@ -248,7 +247,7 @@ volumes:
 
 services:
   openclaw-gateway:
-    image: openclaw:local
+    image: ${OPENCLAW_IMAGE}
     container_name: openclaw-gateway
     restart: unless-stopped
     command: ["node", "dist/index.js", "gateway"]

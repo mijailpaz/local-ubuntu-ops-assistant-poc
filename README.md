@@ -66,7 +66,7 @@ The script will ask for:
 The installer will:
 
 - install Docker and Docker Compose
-- build OpenClaw locally
+- pull the official prebuilt OpenClaw Docker image
 - create a Telegram-only OpenClaw config with an allowlist
 - create a local n8n + Postgres + Redis stack
 - add a workflow catalog and guardrail skills into the OpenClaw workspace
