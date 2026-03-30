@@ -159,7 +159,85 @@ Recommended behavior guidance lives in [docs/demo-checklist.md](docs/demo-checkl
 - If you need public inbound webhooks later, add a tunnel, reverse proxy, or VPN layer
 - For a production deployment, reintroduce HTTPS, stronger network controls, secrets management, and audited approval flows
 
+## Changing API Key Or Model
+
+If you need to update the OpenAI key after installation, edit:
+
+- `/opt/openclaw/.env`
+
+Change:
+
+```env
+OPENAI_API_KEY=your-new-key
+```
+
+Then recreate the OpenClaw container so Docker picks up the new environment variable:
+
+```bash
+cd /opt/openclaw
+docker compose up -d --force-recreate openclaw-gateway
+```
+
+If you only restart the container, Docker may keep using the old environment value.
+
+If you want to change the model, edit:
+
+- `/root/.openclaw/openclaw.json`
+
+Update both:
+
+- `agents.defaults.model.primary`
+- the matching entry under `agents.defaults.models`
+
+Current example from this repository:
+
+```json
+{
+  "model": { "primary": "openai/gpt-4.1-mini" },
+  "models": { "openai/gpt-4.1-mini": {} }
+}
+```
+
+After changing the model config, restart or recreate the OpenClaw container:
+
+```bash
+cd /opt/openclaw
+docker compose up -d --force-recreate openclaw-gateway
+```
+
+Do not rerun `setup.sh` just to rotate the API key or switch models unless you want a full re-bootstrap, because the installer also regenerates other secrets and tokens.
+
 ## Useful Commands
+
+You can use the included `Makefile` from the repository root:
+
+```bash
+make help
+```
+
+Common targets:
+
+```bash
+make setup
+make start
+make stop
+make restart
+make recreate-gateway
+make logs
+make logs-openclaw
+make logs-n8n
+make ps
+make cleanup
+```
+
+Destructive or host-level targets:
+
+```bash
+make reset
+make reboot-host
+```
+
+Equivalent raw Docker commands:
 
 ```bash
 # View all logs
@@ -221,6 +299,7 @@ Check:
 
 ## Next Docs
 
+- [docs/setup-guide.md](docs/setup-guide.md)
 - [docs/poc-workflows.md](docs/poc-workflows.md)
 - [docs/demo-checklist.md](docs/demo-checklist.md)
 - [docs/production-concerns.md](docs/production-concerns.md)
