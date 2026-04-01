@@ -50,6 +50,7 @@ Use this checklist to validate the local Ubuntu operations assistant proof of co
 
 - The assistant runs on a local machine inside the trusted environment.
 - Operators interact through a familiar chat tool instead of a new custom UI.
+- OpenClaw handles the chat experience while `n8n` handles deterministic workflow execution.
 - Internal tools stay behind controlled workflows rather than direct free-form execution.
 - The POC enhances operator speed while keeping a human in control for sensitive actions.
 
