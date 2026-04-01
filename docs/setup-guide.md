@@ -94,6 +94,15 @@ cp .env.example .env
 
 Optionally fill in any values you already know in `.env`. The installer will only prompt for missing values.
 
+By default, this repository builds a local OpenClaw image with Python 3, `pip`, `seaborn`, `matplotlib`, `pandas`, `numpy`, and `Pillow` already installed.
+
+If you want to skip that local build and use the upstream image instead, set this in `.env` before running the installer:
+
+```env
+OPENCLAW_BUILD_LOCAL_IMAGE=false
+OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:latest
+```
+
 Run:
 
 ```bash
@@ -112,7 +121,7 @@ The script will ask for:
 The installer will then:
 
 - install Docker and Docker Compose
-- pull the official prebuilt OpenClaw image
+- build the local Python-enabled OpenClaw image, unless you disable it in `.env`
 - create the OpenClaw configuration
 - create the Telegram channel configuration with your allowlisted user ID
 - store the Sympla token in the local runtime environment
@@ -132,6 +141,8 @@ At the end of the install, save these values:
 
 You will need them when creating the n8n workflow.
 
+The installer also prints the Python tooling available inside `openclaw-gateway` and the suggested output directory for generated charts or images.
+
 ## 9. Open n8n In The Browser
 
 Open:
@@ -146,6 +157,22 @@ Then:
 2. Log in to the n8n UI
 
 This setup uses local HTTP for simplicity, so it is intended for trusted local or LAN testing.
+
+## 9A. Verify Python Tooling In OpenClaw
+
+If you want to confirm the Python runtime before testing the assistant, run:
+
+```bash
+cd /opt/openclaw
+sudo docker compose exec openclaw-gateway python --version
+sudo docker compose exec openclaw-gateway python -c "import seaborn, matplotlib, pandas; print(seaborn.__version__)"
+```
+
+Generated charts or images should be written inside the container under:
+
+```text
+/home/node/.openclaw/workspace/output
+```
 
 ## 10. Import The Sympla Workflow Template
 
