@@ -57,11 +57,18 @@ fi
 N8N_PORT=${N8N_PORT:-5678}
 N8N_PROTOCOL=${N8N_PROTOCOL:-http}
 N8N_BASE_URL="${N8N_PROTOCOL}://${N8N_HOST}:${N8N_PORT}"
-OPENCLAW_IMAGE=${OPENCLAW_IMAGE:-ghcr.io/openclaw/openclaw:latest}
+OPENCLAW_BUILD_LOCAL_IMAGE=${OPENCLAW_BUILD_LOCAL_IMAGE:-true}
+OPENCLAW_IMAGE=${OPENCLAW_IMAGE:-openclaw:python-seaborn}
+OPENCLAW_PYTHON_DOCKERFILE="${SCRIPT_DIR}/docker/openclaw-python/Dockerfile"
 
 echo ""
 echo "n8n will be available at: ${N8N_BASE_URL}"
 echo "OpenClaw image: ${OPENCLAW_IMAGE}"
+if [ "${OPENCLAW_BUILD_LOCAL_IMAGE}" = "true" ]; then
+  echo "OpenClaw image source: local Docker build (${OPENCLAW_PYTHON_DOCKERFILE})"
+else
+  echo "OpenClaw image source: registry pull"
+fi
 echo ""
 
 #######################################
@@ -85,10 +92,21 @@ echo "=== Creating directories ==="
 mkdir -p /opt/openclaw
 mkdir -p /root/.openclaw/workspace/skills/n8n-ops-workflows
 mkdir -p /root/.openclaw/workspace/skills/ops-guardrails
+mkdir -p /root/.openclaw/workspace/skills/python-visualization
+mkdir -p /root/.openclaw/workspace/output
 mkdir -p /root/.openclaw/workspace/playbooks
 
-echo "=== Pulling OpenClaw image ==="
-docker pull "${OPENCLAW_IMAGE}"
+if [ "${OPENCLAW_BUILD_LOCAL_IMAGE}" = "true" ]; then
+  if [ ! -f "${OPENCLAW_PYTHON_DOCKERFILE}" ]; then
+    echo "Custom OpenClaw Dockerfile not found: ${OPENCLAW_PYTHON_DOCKERFILE}"
+    exit 1
+  fi
+  echo "=== Building local OpenClaw image with Python tooling ==="
+  docker build -t "${OPENCLAW_IMAGE}" -f "${OPENCLAW_PYTHON_DOCKERFILE}" "${SCRIPT_DIR}"
+else
+  echo "=== Pulling OpenClaw image ==="
+  docker pull "${OPENCLAW_IMAGE}"
+fi
 cd /opt/openclaw
 
 echo "=== Creating OpenClaw config ==="
@@ -217,6 +235,44 @@ curl -X POST "http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}" \\
 - Use \`requiresConfirmation: true\` for \`sympla_checkin_participant\`.
 - Only execute \`sympla_checkin_participant\` when the operator has explicitly confirmed the action.
 - Never invent workflow results. Report tool failures clearly.
+EOF
+
+echo "=== Creating Python visualization skill ==="
+cat > /root/.openclaw/workspace/skills/python-visualization/SKILL.md << 'EOF'
+---
+name: python-visualization
+description: Use local Python tooling for quick calculations, CSV analysis, and simple charts. Python 3, pip, seaborn, matplotlib, pandas, numpy, and Pillow are preinstalled in the OpenClaw gateway container.
+---
+
+# Environment
+
+- Use `python` or `python3` for scripts.
+- Save generated files under `/home/node/.openclaw/workspace/output`.
+- Prefer PNG output for charts and image attachments.
+- Verify imports before long-running work if a package is critical.
+
+# Examples
+
+Check the runtime:
+
+```bash
+python --version
+python -c "import seaborn, matplotlib, pandas; print(seaborn.__version__)"
+```
+
+Create a simple chart:
+
+```bash
+python - <<'PY'
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(6, 4))
+plt.plot([1, 2, 3], [2, 4, 3], marker='o')
+plt.title('Quick test chart')
+plt.tight_layout()
+plt.savefig('/home/node/.openclaw/workspace/output/test-chart.png', dpi=150)
+PY
+```
 EOF
 
 echo "=== Creating ops guardrail skill ==="
@@ -423,6 +479,12 @@ else
   echo "Sympla token configured: no"
 fi
 echo "Sympla base URL: https://api.sympla.com.br/public/v1.5.1"
+echo ""
+echo "Python tooling inside openclaw-gateway:"
+echo "  - python / python3"
+echo "  - pip / pip3"
+echo "  - seaborn, matplotlib, pandas, numpy, pillow"
+echo "  - output directory: /home/node/.openclaw/workspace/output"
 echo ""
 echo "POC workflows:"
 echo "  - sympla_list_events"

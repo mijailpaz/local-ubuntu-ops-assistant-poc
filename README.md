@@ -71,10 +71,19 @@ The script will ask only for values that are still missing:
 The installer will:
 
 - install Docker and Docker Compose
-- pull the official prebuilt OpenClaw Docker image
+- build a local OpenClaw Docker image with Python 3, `pip`, `seaborn`, `matplotlib`, `pandas`, `numpy`, and `Pillow`
 - create a Telegram-only OpenClaw config with an allowlist
 - create a local n8n + Postgres + Redis stack
 - add a workflow catalog and guardrail skills into the OpenClaw workspace
+
+If you prefer the upstream published OpenClaw image instead of the local Python-enabled build, set:
+
+```env
+OPENCLAW_BUILD_LOCAL_IMAGE=false
+OPENCLAW_IMAGE=ghcr.io/openclaw/openclaw:latest
+```
+
+in the repo-local `.env` before running `make setup`.
 
 ## After Installation
 
@@ -139,6 +148,32 @@ The imported workflow template expects:
 - `SYMPLA_S_TOKEN`
 - `OPENCLAW_GATEWAY_TOKEN`
 - `N8N_WEBHOOK_SECRET`
+
+## Python And Plotting In OpenClaw
+
+This starter now builds a local OpenClaw image that includes:
+
+- `python` / `python3`
+- `pip` / `pip3`
+- `seaborn`
+- `matplotlib`
+- `pandas`
+- `numpy`
+- `Pillow`
+
+The installer also seeds a `python-visualization` skill into the OpenClaw workspace so the agent knows where to save generated files.
+
+Recommended output directory inside the container:
+
+- `/home/node/.openclaw/workspace/output`
+
+After installation, you can verify the runtime from the host with:
+
+```bash
+cd /opt/openclaw
+docker compose exec openclaw-gateway python --version
+docker compose exec openclaw-gateway python -c "import seaborn, matplotlib, pandas; print(seaborn.__version__)"
+```
 
 ## Sending Messages Back To Telegram
 
