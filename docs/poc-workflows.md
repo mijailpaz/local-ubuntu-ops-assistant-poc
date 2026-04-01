@@ -10,7 +10,7 @@ Each workflow is intentionally narrow, demo-friendly, and tied to a real Sympla 
 - Prefer read-only actions first.
 - Require explicit confirmation before any state-changing action.
 - Keep API credentials out of Telegram prompts.
-- Return structured operator summaries instead of raw API JSON.
+- Return structured workflow results instead of raw API JSON.
 
 ## Workflow 1: `sympla_list_events`
 
@@ -120,16 +120,17 @@ Use one inbound webhook and route on the `workflow` field:
 2. Validate the `X-Webhook-Secret`.
 3. Switch node branches on `workflow`.
 4. Each branch calls the relevant Sympla endpoint with `S_TOKEN` from environment.
-5. A formatter node builds a short structured result.
-6. An HTTP Request node sends the result back through `sessions_send`.
+5. A formatter node builds deterministic JSON for the selected workflow.
+6. OpenClaw interprets that JSON and turns it into the Telegram-facing reply.
 
 ## Response Format
 
-Keep replies concise and operator-friendly:
+Keep the n8n response deterministic and easy for OpenClaw to interpret:
 
-- `Status`
-- `Findings`
-- `Action taken`
-- `Next step`
+- `workflow`
+- `status`
+- `action`
+- `data`
+- `nextActionHint`
 
-This keeps the POC useful for operators and easy to demo.
+OpenClaw should then turn that response into concise operator-facing language in Telegram.

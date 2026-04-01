@@ -94,6 +94,11 @@ cp .env.example .env
 
 Optionally fill in any values you already know in `.env`. The installer will only prompt for missing values.
 
+You can also leave these optional values blank until after `n8n` is initialized:
+
+- `N8N_API_BASE_URL`
+- `N8N_API_KEY`
+
 By default, this repository builds a local OpenClaw image with Python 3, `pip`, `seaborn`, `matplotlib`, `pandas`, `numpy`, and `Pillow` already installed.
 
 If you want to skip that local build and use the upstream image instead, set this in `.env` before running the installer:
@@ -128,6 +133,8 @@ The installer will then:
 - create the n8n, Postgres, and Redis stack
 - print the generated secrets and webhook information
 
+The installer does not require an `n8n` API key on first boot. That is handled in a second step after the `n8n` owner account exists.
+
 ## 8. Save The Installer Output
 
 At the end of the install, save these values:
@@ -136,7 +143,6 @@ At the end of the install, save these values:
 - `Webhook URL`
 - `Header Auth Name`
 - `Header Auth Value`
-- `OpenClaw Gateway Token`
 - `Sympla base URL`
 
 You will need them when creating the n8n workflow.
@@ -174,6 +180,24 @@ Generated charts or images should be written inside the container under:
 /home/node/.openclaw/workspace/output
 ```
 
+## 9B. Optional: Enable n8n API Access For OpenClaw
+
+If you want OpenClaw to help inspect or draft workflows through the `n8n` management API:
+
+1. Generate an `n8n` API key in the `n8n` UI
+2. From the repo root, run:
+
+```bash
+make configure-n8n-api
+```
+
+That helper stores:
+
+- `N8N_API_BASE_URL`
+- `N8N_API_KEY`
+
+in `/opt/openclaw/.env` and recreates `openclaw-gateway`.
+
 ## 10. Import The Sympla Workflow Template
 
 Import the workflow template stored in this repository:
@@ -194,7 +218,6 @@ This workflow template expects these environment variables inside n8n:
 
 - `SYMPLA_BASE_URL`
 - `SYMPLA_S_TOKEN`
-- `OPENCLAW_GATEWAY_TOKEN`
 - `N8N_WEBHOOK_SECRET`
 
 The installer writes these into `/opt/openclaw/.env` and injects them into the n8n containers.
@@ -256,12 +279,12 @@ The imported workflow should perform:
 1. `sympla_list_events` -> `GET /events`
 2. `sympla_lookup_participant_by_ticket` -> `GET /events/{event_id}/participants/ticketNumber/{ticket_number}`
 
-Each branch should format the Sympla result into a short operator message with:
+Each branch should return deterministic JSON for OpenClaw to summarize, for example:
 
-- `Status`
-- `Findings`
-- `Action taken`
-- `Next step`
+- `status`
+- `action`
+- `data`
+- `nextActionHint`
 
 ## 15. Confirm The Gated Check-In Path
 
@@ -270,7 +293,7 @@ The imported workflow should not execute check-in on the first request.
 Expected behavior:
 
 1. The operator requests `sympla_checkin_participant`
-2. The workflow returns a confirmation-needed message
+2. The workflow returns a `confirmation_required` structured result
 3. Only a second confirmed request should trigger the POST check-in call
 
 The check-in endpoint should use:
@@ -279,29 +302,28 @@ The check-in endpoint should use:
 POST /events/{{event_id}}/participants/ticketNumber/{{ticket_number}}/checkin
 ```
 
-## 16. Send The Result Back To OpenClaw
+## 16. Return Structured Results To OpenClaw
 
-After the formatter node, add an `HTTP Request` node in n8n with:
+The last node in each branch should return structured JSON directly to the webhook response instead of calling `sessions_send`.
 
-- URL: `http://openclaw-gateway:18789/tools/invoke`
-- Method: `POST`
-- Header `Authorization`: `Bearer YOUR_GATEWAY_TOKEN`
-- Header `Content-Type`: `application/json`
-
-Example body:
+Example response:
 
 ```json
 {
-  "tool": "sessions_send",
-  "args": {
-    "sessionKey": "agent:main:main",
-    "message": "Status: healthy. Findings: Payments API responded normally. Action taken: read-only check completed. Next step: no action required.",
-    "timeoutSeconds": 0
-  }
+  "workflow": "sympla_lookup_participant_by_ticket",
+  "status": "success",
+  "action": "participant_lookup_completed",
+  "data": {
+    "event_id": "123456",
+    "ticket_number": "QHWA-1Q-3G0J",
+    "participant_name": "Jane Doe",
+    "checkin_status": "not_checked_in"
+  },
+  "nextActionHint": "offer_gated_checkin_if_operator_requests"
 }
 ```
 
-Use the gateway token printed by the installer.
+OpenClaw should interpret this response and compose the Telegram-facing reply.
 
 ## 17. Activate The Workflow
 
@@ -424,7 +446,7 @@ cd /opt/openclaw
 sudo docker compose up -d --force-recreate openclaw-gateway
 ```
 
-Do not rerun `setup.sh` only to rotate the API key, rotate the Sympla token, or change the model unless you want a full re-bootstrap, because the installer also regenerates other secrets such as the webhook secret and gateway token.
+Do not rerun `setup.sh` only to rotate the API key, rotate the Sympla token, configure the optional `n8n` API key, or change the model unless you want a full re-bootstrap, because the installer also regenerates other secrets such as the webhook secret.
 
 ## 22. Troubleshooting
 
@@ -446,7 +468,6 @@ If the webhook does not run:
 - verify the webhook path
 - verify `X-Webhook-Secret`
 - verify the workflow is activated
-- verify the HTTP Request node uses the correct gateway token
 - verify `SYMPLA_S_TOKEN` is present in `/opt/openclaw/.env`
 - verify the n8n containers were recreated after changing the Sympla token
 

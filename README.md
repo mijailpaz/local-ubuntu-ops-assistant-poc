@@ -68,6 +68,11 @@ The script will ask only for values that are still missing:
 - Sympla `S_TOKEN`
 - Local hostname or IP address to use for the n8n UI
 
+Optional repo-local `.env` values for later phases:
+
+- `N8N_API_BASE_URL`
+- `N8N_API_KEY`
+
 The installer will:
 
 - install Docker and Docker Compose
@@ -91,8 +96,9 @@ in the repo-local `.env` before running `make setup`.
 2. Create the initial n8n owner account in the browser
 3. Import the Sympla workflow template from `workflows/n8n/sympla-poc-workflow.json`
 4. Update the webhook path in the imported workflow to match the generated `N8N_WEBHOOK_PATH`
-5. Message your Telegram bot
-6. Test one read-only flow before trying the gated check-in action
+5. Optionally create an `n8n` API key and run `make configure-n8n-api` if you want OpenClaw to help inspect or draft workflows through the `n8n` API
+6. Message your Telegram bot
+7. Test one read-only flow before trying the gated check-in action
 
 ## POC Workflow Set
 
@@ -132,6 +138,23 @@ The assistant will send payloads in this shape:
 }
 ```
 
+The workflow should return structured JSON in this shape:
+
+```json
+{
+  "workflow": "sympla_lookup_participant_by_ticket",
+  "status": "success",
+  "action": "participant_lookup_completed",
+  "data": {
+    "event_id": "123456",
+    "ticket_number": "QHWA-1Q-3G0J",
+    "participant_name": "Jane Doe",
+    "checkin_status": "not_checked_in"
+  },
+  "nextActionHint": "offer_gated_checkin_if_operator_requests"
+}
+```
+
 ## Sympla Credential Handling
 
 The Sympla workflows use the `S_TOKEN` API header shown in [Sympla API v1.5.1.postman_collection.json](Sympla%20API%20v1.5.1.postman_collection.json).
@@ -146,8 +169,17 @@ The imported workflow template expects:
 
 - `SYMPLA_BASE_URL`
 - `SYMPLA_S_TOKEN`
-- `OPENCLAW_GATEWAY_TOKEN`
 - `N8N_WEBHOOK_SECRET`
+
+## Separation Of Concerns
+
+This POC works best when the responsibilities stay sharp:
+
+- OpenClaw handles Telegram, conversation flow, clarification, confirmation UX, and operator-facing wording.
+- `n8n` handles authenticated webhooks, deterministic branching, external API calls, and structured results.
+- Sympla is the reference integration for the deterministic workflow layer, not the center of the architecture.
+
+That makes the integration boundary simple: OpenClaw sends a workflow request, `n8n` returns facts, and OpenClaw turns those facts into chat replies.
 
 ## Python And Plotting In OpenClaw
 
@@ -175,28 +207,48 @@ docker compose exec openclaw-gateway python --version
 docker compose exec openclaw-gateway python -c "import seaborn, matplotlib, pandas; print(seaborn.__version__)"
 ```
 
-## Sending Messages Back To Telegram
+## Stable Contract
 
-Use an **HTTP Request** node in n8n:
+Treat the OpenClaw-to-`n8n` webhook as the stable contract between the chat-facing brain and the workflow layer:
 
-- **URL**: `http://openclaw-gateway:18789/tools/invoke`
-- **Method**: `POST`
-- **Headers**:
-  - `Authorization: Bearer YOUR_GATEWAY_TOKEN`
-  - `Content-Type: application/json`
+- OpenClaw sends `workflow`, `summary`, `requiresConfirmation`, and `data`
+- `n8n` validates the secret, routes the workflow, and returns deterministic JSON
+- OpenClaw interprets `status`, `action`, `data`, and `nextActionHint` before replying in Telegram
 
-Example body:
+This keeps the operator experience in one place and makes the `n8n` workflows easier to test like API endpoints.
 
-```json
-{
-  "tool": "sessions_send",
-  "args": {
-    "sessionKey": "agent:main:main",
-    "message": "Status: healthy. Findings: all checks passed.",
-    "timeoutSeconds": 0
-  }
-}
-```
+## Optional n8n API Authoring
+
+If you want OpenClaw to help inspect or draft workflows through the `n8n` management API, use a second-phase setup:
+
+1. Finish the normal install and create the initial `n8n` owner account
+2. Generate an `n8n` API key in the `n8n` UI
+3. Run `make configure-n8n-api`
+
+That helper stores:
+
+- `N8N_API_BASE_URL`
+- `N8N_API_KEY`
+
+in `/opt/openclaw/.env` and recreates `openclaw-gateway` so only OpenClaw receives the management API settings.
+
+Recommended scope for this feature:
+
+- list workflows
+- fetch workflow JSON
+- create draft workflows
+- update draft workflows
+
+Avoid letting OpenClaw activate, delete, or credential-manage workflows automatically unless you add explicit approval steps.
+
+## Trust Boundary
+
+The intended trust boundary in this POC is:
+
+- Telegram carries operator intent and confirmations, not backend secrets
+- OpenClaw decides how to talk to the operator and when to invoke an approved workflow
+- `n8n` holds the integration logic and consumes server-side secrets such as `SYMPLA_S_TOKEN`
+- backend APIs return data to `n8n`, and only structured workflow results flow back to OpenClaw
 
 ## Guardrails In This POC
 
@@ -206,7 +258,7 @@ This repo now assumes a narrow internal-ops demo rather than an unrestricted ass
 - Read-only workflows come first
 - Write actions require explicit confirmation
 - The webhook contract uses approved workflow names instead of arbitrary tasks
-- n8n is used as the control point for internal actions
+- `n8n` is used as the deterministic control point for internal actions
 
 Recommended behavior guidance lives in [docs/demo-checklist.md](docs/demo-checklist.md).
 
@@ -219,7 +271,7 @@ Recommended behavior guidance lives in [docs/demo-checklist.md](docs/demo-checkl
 
 ## Changing API Key Or Model
 
-If you need to update the OpenAI or Sympla key after installation, edit:
+If you need to update the OpenAI key, Sympla token, or optional `n8n` API settings after installation, edit:
 
 - `/opt/openclaw/.env`
 
@@ -228,6 +280,8 @@ Change:
 ```env
 OPENAI_API_KEY=your-new-key
 SYMPLA_S_TOKEN=your-new-sympla-token
+N8N_API_BASE_URL=http://YOUR_HOST_OR_IP:5678/api/v1
+N8N_API_KEY=your-n8n-api-key
 ```
 
 Then recreate the affected containers so Docker picks up the new environment variables:
@@ -239,6 +293,8 @@ docker compose up -d --force-recreate n8n n8n-worker
 ```
 
 If you only restart the containers, Docker may keep using the old environment values.
+
+If you changed only `N8N_API_BASE_URL` or `N8N_API_KEY`, recreating `openclaw-gateway` is enough.
 
 If you want to change the model, edit:
 
@@ -279,6 +335,7 @@ Common targets:
 
 ```bash
 make setup
+make configure-n8n-api
 make start
 make stop
 make restart
@@ -355,7 +412,7 @@ Check:
 - the webhook path matches the generated value
 - the `X-Webhook-Secret` header is correct
 - the workflow name is one of the approved POC names
-- n8n can reach `http://openclaw-gateway:18789/tools/invoke`
+- the workflow is activated in `n8n`
 
 ## Next Docs
 

@@ -57,6 +57,7 @@ fi
 N8N_PORT=${N8N_PORT:-5678}
 N8N_PROTOCOL=${N8N_PROTOCOL:-http}
 N8N_BASE_URL="${N8N_PROTOCOL}://${N8N_HOST}:${N8N_PORT}"
+N8N_API_BASE_URL=${N8N_API_BASE_URL:-${N8N_BASE_URL}/api/v1}
 OPENCLAW_BUILD_LOCAL_IMAGE=${OPENCLAW_BUILD_LOCAL_IMAGE:-true}
 OPENCLAW_IMAGE=${OPENCLAW_IMAGE:-openclaw:python-seaborn}
 OPENCLAW_PYTHON_DOCKERFILE="${SCRIPT_DIR}/docker/openclaw-python/Dockerfile"
@@ -91,6 +92,7 @@ systemctl start docker
 echo "=== Creating directories ==="
 mkdir -p /opt/openclaw
 mkdir -p /root/.openclaw/workspace/skills/n8n-ops-workflows
+mkdir -p /root/.openclaw/workspace/skills/n8n-workflow-authoring
 mkdir -p /root/.openclaw/workspace/skills/ops-guardrails
 mkdir -p /root/.openclaw/workspace/skills/python-visualization
 mkdir -p /root/.openclaw/workspace/output
@@ -161,21 +163,24 @@ Approved workflows for this proof of concept:
 1. sympla_list_events
    - Purpose: List organizer events from Sympla.
    - Risk: Read-only.
+   - Result shape: structured JSON for OpenClaw to summarize in chat.
 
 2. sympla_lookup_participant_by_ticket
    - Purpose: Look up a Sympla participant using an event ID and ticket number.
    - Risk: Read-only.
+   - Result shape: structured JSON for OpenClaw to summarize in chat.
 
 3. sympla_checkin_participant
    - Purpose: Perform a participant check-in in Sympla using an event ID and ticket number.
    - Risk: Write action. Explicit human confirmation required.
+   - Result shape: confirmation status or execution result as structured JSON.
 EOF
 
 echo "=== Creating n8n ops workflow skill ==="
 cat > /root/.openclaw/workspace/skills/n8n-ops-workflows/SKILL.md << EOF
 ---
 name: n8n-ops-workflows
-description: Trigger approved Sympla-backed workflows through n8n. Use this for event listing, participant lookup by ticket number, and gated participant check-in.
+description: Trigger approved Sympla-backed workflows through n8n. Use this for event listing, participant lookup by ticket number, and gated participant check-in. OpenClaw owns the operator-facing wording and confirmation flow.
 ---
 
 # Approved workflow endpoint
@@ -211,10 +216,30 @@ Send JSON with this shape:
 }
 \`\`\`
 
-## Authentication model
+## Response contract
+
+The n8n webhook returns deterministic JSON for OpenClaw to interpret and phrase for the operator.
+
+\`\`\`json
+{
+  "workflow": "sympla_lookup_participant_by_ticket",
+  "status": "success",
+  "action": "participant_lookup_completed",
+  "data": {
+    "event_id": "123456",
+    "ticket_number": "QHWA-1Q-3G0J",
+    "participant_name": "Jane Doe",
+    "checkin_status": "not_checked_in"
+  },
+  "nextActionHint": "offer_gated_checkin_if_operator_requests"
+}
+\`\`\`
+
+## Responsibility split
 
 - The operator should never be asked for the Sympla \`S_TOKEN\` in Telegram.
-- \`n8n\` reads the Sympla token from its runtime environment.
+- OpenClaw owns chat wording, clarification, and confirmation UX.
+- \`n8n\` validates the webhook, routes the workflow, executes the Sympla calls, and returns structured JSON.
 - This keeps Telegram focused on operator inputs such as \`event_id\`, \`ticket_number\`, and explicit confirmation.
 
 ## How to call it
@@ -228,13 +253,61 @@ curl -X POST "http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}" \\
   -d '{"workflow":"sympla_lookup_participant_by_ticket","summary":"Check a participant by ticket number","requiresConfirmation":false,"data":{"event_id":"123456","ticket_number":"QHWA-1Q-3G0J","confirmed":false}}'
 \`\`\`
 
+Handle the JSON response in OpenClaw and compose the Telegram-facing reply there. Do not expect \`n8n\` to call \`sessions_send\` directly.
+
 ## Safety rules
 
 - Only use approved workflow names.
 - Ask for missing identifiers before running the workflow.
 - Use \`requiresConfirmation: true\` for \`sympla_checkin_participant\`.
 - Only execute \`sympla_checkin_participant\` when the operator has explicitly confirmed the action.
+- Interpret the returned \`status\`, \`action\`, \`data\`, and \`nextActionHint\` before replying.
 - Never invent workflow results. Report tool failures clearly.
+EOF
+
+echo "=== Creating n8n workflow authoring skill ==="
+cat > /root/.openclaw/workspace/skills/n8n-workflow-authoring/SKILL.md << EOF
+---
+name: n8n-workflow-authoring
+description: Use the n8n management API to inspect, draft, and update workflows after a human has configured N8N_API_KEY for OpenClaw. Prefer draft workflow creation and explicit review before activation.
+---
+
+# Availability
+
+- This skill only works after a human configures \`N8N_API_KEY\` for OpenClaw.
+- Expected environment:
+  - \`N8N_API_BASE_URL\`
+  - \`N8N_API_KEY\`
+- Default API base URL for this stack: \`${N8N_API_BASE_URL}\`
+
+# Authentication
+
+Use the header:
+
+- \`X-N8N-API-KEY: <N8N_API_KEY>\`
+
+# Safe usage pattern
+
+- Prefer listing workflows before editing anything.
+- Prefer creating new drafts instead of overwriting active workflows.
+- Do not create or update credentials through the API unless the operator explicitly asks.
+- Do not activate or replace a workflow without explicit operator confirmation.
+- When updating an existing workflow, fetch it first, preserve unrelated fields, then apply the minimal change.
+
+# Useful endpoints
+
+- \`GET /workflows\`
+- \`GET /workflows/{workflowId}\`
+- \`POST /workflows\`
+- \`PUT /workflows/{workflowId}\`
+
+# Example request
+
+\`\`\`bash
+curl -X GET "\${N8N_API_BASE_URL}/workflows" \\
+  -H "X-N8N-API-KEY: \${N8N_API_KEY}" \\
+  -H "Content-Type: application/json"
+\`\`\`
 EOF
 
 echo "=== Creating Python visualization skill ==="
@@ -301,7 +374,6 @@ EOF
 
 echo "=== Creating .env file ==="
 cat > /opt/openclaw/.env << EOF
-OPENCLAW_GATEWAY_TOKEN=${GATEWAY_TOKEN}
 OPENCLAW_IMAGE=${OPENCLAW_IMAGE}
 POSTGRES_USER=n8n
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
@@ -315,6 +387,8 @@ N8N_PORT=${N8N_PORT}
 N8N_PROTOCOL=${N8N_PROTOCOL}
 N8N_BASE_URL=${N8N_BASE_URL}
 N8N_EDITOR_BASE_URL=${N8N_BASE_URL}
+N8N_API_BASE_URL=${N8N_API_BASE_URL}
+N8N_API_KEY=${N8N_API_KEY:-}
 N8N_WEBHOOK_PATH=${N8N_WEBHOOK_PATH}
 N8N_WEBHOOK_SECRET=${N8N_WEBHOOK_SECRET}
 EOF
@@ -343,6 +417,8 @@ services:
       - no-new-privileges:true
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - N8N_API_BASE_URL=${N8N_API_BASE_URL}
+      - N8N_API_KEY=${N8N_API_KEY}
     volumes:
       - /root/.openclaw:/home/node/.openclaw
     networks:
@@ -363,7 +439,6 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
@@ -401,7 +476,6 @@ services:
       - DB_POSTGRESDB_USER=${POSTGRES_USER}
       - DB_POSTGRESDB_PASSWORD=${POSTGRES_PASSWORD}
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
-      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN}
       - N8N_HOST=${N8N_HOST}
       - N8N_PORT=5678
       - N8N_PROTOCOL=${N8N_PROTOCOL}
@@ -469,10 +543,6 @@ echo "  Webhook URL: http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}"
 echo "  Header Auth Name: X-Webhook-Secret"
 echo "  Header Auth Value: ${N8N_WEBHOOK_SECRET}"
 echo ""
-echo "----------------------------------------"
-echo "OpenClaw Gateway Token: ${GATEWAY_TOKEN}"
-echo "----------------------------------------"
-echo ""
 if [ -n "${SYMPLA_S_TOKEN}" ]; then
   echo "Sympla token configured: yes"
 else
@@ -491,20 +561,31 @@ echo "  - sympla_list_events"
 echo "  - sympla_lookup_participant_by_ticket"
 echo "  - sympla_checkin_participant"
 echo ""
-echo "To send messages from n8n to OpenClaw/Telegram:"
+echo "OpenClaw to n8n contract:"
 echo ""
-echo "  URL: http://openclaw-gateway:18789/tools/invoke"
+echo "  Request URL: http://n8n:5678/webhook/${N8N_WEBHOOK_PATH}"
 echo "  Method: POST"
 echo "  Headers:"
-echo "    Authorization: Bearer ${GATEWAY_TOKEN}"
+echo "    X-Webhook-Secret: ${N8N_WEBHOOK_SECRET}"
 echo "    Content-Type: application/json"
 echo "  Body:"
-echo '    {"tool":"sessions_send","args":{"sessionKey":"agent:main:main","message":"Hello from n8n!","timeoutSeconds":0}}'
+echo '    {"workflow":"sympla_lookup_participant_by_ticket","summary":"Check a participant by ticket number","requiresConfirmation":false,"data":{"event_id":"123456","ticket_number":"QHWA-1Q-3G0J","confirmed":false}}'
+echo "  Response:"
+echo '    {"workflow":"sympla_lookup_participant_by_ticket","status":"success","action":"participant_lookup_completed","data":{"event_id":"123456","ticket_number":"QHWA-1Q-3G0J","participant_name":"Jane Doe","checkin_status":"not_checked_in"},"nextActionHint":"offer_gated_checkin_if_operator_requests"}'
+echo ""
+if [ -n "${N8N_API_KEY:-}" ]; then
+  echo "n8n management API for OpenClaw: configured"
+  echo "  API base URL: ${N8N_API_BASE_URL}"
+else
+  echo "n8n management API for OpenClaw: not configured yet"
+  echo "  After creating the n8n owner account and API key, run: make configure-n8n-api"
+fi
 echo ""
 echo "Next steps:"
 echo "  1. Open ${N8N_BASE_URL}"
 echo "  2. Create your n8n owner account"
 echo "  3. Import the Sympla n8n workflow template from this repository"
 echo "  4. Update the webhook path in n8n to ${N8N_WEBHOOK_PATH}"
-echo "  5. Message your Telegram bot to test the assistant"
+echo "  5. Optionally run make configure-n8n-api after creating an n8n API key"
+echo "  6. Message your Telegram bot to test the assistant"
 echo ""

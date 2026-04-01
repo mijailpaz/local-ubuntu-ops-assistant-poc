@@ -1,4 +1,4 @@
-.PHONY: help init check-stack setup start stop restart recreate recreate-gateway logs logs-openclaw logs-n8n ps config pull cleanup reset reboot-host
+.PHONY: help init check-stack setup configure-n8n-api start stop restart recreate recreate-gateway logs logs-openclaw logs-n8n ps config pull cleanup reset reboot-host
 
 STACK_DIR ?= /opt/openclaw
 COMPOSE_CMD = sudo docker compose --env-file "$(STACK_DIR)/.env" -f "$(STACK_DIR)/docker-compose.yml"
@@ -7,6 +7,7 @@ help:
 	@echo "Common commands:"
 	@echo "  make init             Create .env from .env.example and edit it in nano"
 	@echo "  make setup            Run the local Ubuntu installer"
+	@echo "  make configure-n8n-api Save an n8n API key for OpenClaw"
 	@echo "  make start            Start the stack"
 	@echo "  make stop             Stop the stack"
 	@echo "  make restart          Restart running containers"
@@ -33,6 +34,10 @@ check-stack:
 setup:
 	chmod +x setup.sh
 	sudo ./setup.sh
+
+configure-n8n-api: check-stack
+	chmod +x scripts/configure-n8n-api.sh
+	sudo ./scripts/configure-n8n-api.sh
 
 start: check-stack
 	$(COMPOSE_CMD) up -d
